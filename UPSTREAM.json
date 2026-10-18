@@ -1,0 +1,35 @@
+{
+  "repository": "https://github.com/hpc4cmb/toast",
+  "commit": "9595449aa2887c93b773821ce6f1ef92fb16d08e",
+  "path": "src/toast/ops/sim_ground.py",
+  "sha256": "eff1ac3ad41a9095670ba5357903581a4da01b1c6a75c37f8f236aef2cf2c4df",
+  "changes": [
+    "SimGround class renamed SimFYST",
+    "Relative TOAST imports changed to absolute imports",
+    "Stage-0 comment added"
+  ],
+  "stage": "SimFYST is a CES baseline with no trajectory HDF5 reader; standalone writer is separate",
+  "copy_ast_check": "Only import paths and class name differ",
+  "writer": {
+    "origin": "local working-tree example; untracked in the source repository at copy time",
+    "workspace_relative_path": "fyst-trajectories/examples/fyst_to_toast/hdf5/03_save_trajectory.py",
+    "copied_on": "2026-10-18",
+    "sha256": "ca2c9b3eaae197e3e8e8929e91cb745f236bc30573f2e9b50e71276ad8a6f61f",
+    "destination": "examples/02_save_trajectory.py",
+    "changes": [
+      "Explicit trajectory / schedule / output / IERS paths; no sibling-repository imports",
+      "Read pattern name from input metadata; preserve native block partition",
+      "CLI input and overwrite validation, main guard and Data cleanup",
+      "Keep native TOAST SaveHDF5 schema, arrays, flag mapping, pointing and demo focalplane"
+    ]
+  },
+  "tested_fyst_dependency": {
+    "version": "0.8.0",
+    "base_commit": "2d0a3d395486fd4a43d83c8b38138e9b7bb6159b",
+    "source_path": "src/fyst_trajectories/overhead/io.py",
+    "working_tree_sha256": "b405d0fe67d46eacb201afa33431e7c755ec89321a90e64844865bd186ca86cf",
+    "compatibility_patch": "docs/patches/fyst-timeline-utc.patch",
+    "patch_sha256": "2e5e295a60239173bd1fa0dcb1366b26e038b7e6abde73f609e3805925b18c63",
+    "note": "Existing local UTC-offset timestamp compatibility change; archived for reproducibility, not applied automatically. Other source working-tree changes are not copied."
+  }
+}

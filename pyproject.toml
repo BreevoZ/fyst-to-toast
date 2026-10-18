@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fyst-toast"
+version = "0.1.0.dev0"
+description = "Experimental FYST-to-TOAST adapter: CES baseline and trajectory HDF5 export"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-2-Clause AND BSD-3-Clause"
+license-files = ["LICENSE", "AUTHORS", "LICENSES/*.txt", "NOTICE"]
+dependencies = [
+    "toast>=3.0.5,<4",
+    "numpy",
+    "scipy",
+    "astropy",
+    "traitlets",
+]
+
+[project.optional-dependencies]
+writer = ["fyst-trajectories>=0.8,<0.9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

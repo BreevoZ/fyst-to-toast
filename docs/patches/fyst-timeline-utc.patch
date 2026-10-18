@@ -1,0 +1,102 @@
+diff --git a/src/fyst_trajectories/overhead/io.py b/src/fyst_trajectories/overhead/io.py
+index a9f3144..e47e408 100644
+--- a/src/fyst_trajectories/overhead/io.py
++++ b/src/fyst_trajectories/overhead/io.py
+@@ -6,6 +6,7 @@ with FYST-specific extensions for calibration blocks.
+ 
+ import json
+ import warnings
++from datetime import datetime, timezone
+ from pathlib import Path
+ 
+ from astropy import units as u
+@@ -38,6 +39,24 @@ __all__ = [
+ ]
+ 
+ 
++def _iso_utc(value: Time) -> str:
++    """Serialize an absolute instant with UTC offset and datetime microsecond precision.
++
++    TOAST uses datetime.fromisoformat, then timestamp(). A naive ISO string
++    would be interpreted in the consumer's local timezone. Use +00:00 (also
++    supported by Python 3.10) and avoid Time.iso's configurable display precision.
++    """
++    return value.utc.to_datetime(timezone=timezone.utc).isoformat(timespec="microseconds")
++
++
++def _read_time(value: str) -> Time:
++    """Accept legacy astropy time strings and ISO strings with explicit UTC offsets."""
++    try:
++        return Time(value, scale="utc")
++    except ValueError:
++        return Time(datetime.fromisoformat(value.replace("Z", "+00:00")), scale="utc")
++
++
+ # Metadata key used for per-block retune event provenance. When a block's
+ # ``metadata`` carries this key (value: a sequence of
+ # :class:`~fyst_trajectories.trajectory.RetuneEvent`), the ECSV writer
+@@ -98,7 +117,8 @@ def write_timeline(
+     """Write a timeline to a TOAST-compatible ECSV file.
+ 
+     The output uses TOAST canonical column names (``start_time``,
+-    ``stop_time`` as ISO strings, ``name``, ``azmin``, ``azmax``,
++    ``stop_time`` as ISO UTC strings with explicit ``+00:00`` offsets and
++    microsecond precision, ``name``, ``azmin``, ``azmax``,
+     ``el``, ``boresight_angle``, ``scan_index``, ``subscan_index``)
+     plus FYST extension columns (``block_type``, ``scan_type``,
+     ``rising``, the science-block geometry columns ``ra_center``,
+@@ -137,8 +157,8 @@ def write_timeline(
+         meta_for_json = _encode_retune_events_for_json(dict(meta))
+         rows.append(
+             {
+-                "start_time": block.t_start.iso,
+-                "stop_time": block.t_stop.iso,
++                "start_time": _iso_utc(block.t_start),
++                "stop_time": _iso_utc(block.t_stop),
+                 "boresight_angle": bangle,
+                 "name": block.patch_name,
+                 "azmin": block.az_start,
+@@ -195,8 +215,8 @@ def write_timeline(
+     # window would otherwise shrink to the block extents on read). Stored as ISO
+     # strings, mirroring the block time columns. Older files without these keys
+     # fall back to the block-extent derivation in ``read_timeline``.
+-    table.meta["timeline_start_time"] = timeline.start_time.iso
+-    table.meta["timeline_end_time"] = timeline.end_time.iso
++    table.meta["timeline_start_time"] = _iso_utc(timeline.start_time)
++    table.meta["timeline_end_time"] = _iso_utc(timeline.end_time)
+     table.meta["site_name"] = timeline.site.name
+     table.meta["site_description"] = timeline.site.description
+     table.meta["telescope_name"] = timeline.site.name
+@@ -364,8 +384,8 @@ def read_timeline(path: str | Path) -> ObservingTimeline:
+ 
+     blocks = []
+     for row in table:
+-        t_start = Time(str(row["start_time"]), scale="utc")
+-        t_stop = Time(str(row["stop_time"]), scale="utc")
++        t_start = _read_time(str(row["start_time"]))
++        t_stop = _read_time(str(row["stop_time"]))
+ 
+         block_type = str(row["block_type"]) if has_block_type else "science"
+         scan_type = str(row["scan_type"]) if has_scan_type else ""
+@@ -438,8 +458,8 @@ def read_timeline(path: str | Path) -> ObservingTimeline:
+     _meta_start = meta.get("timeline_start_time")
+     _meta_end = meta.get("timeline_end_time")
+     if _meta_start is not None and _meta_end is not None:
+-        tl_start = Time(str(_meta_start), scale="utc")
+-        tl_end = Time(str(_meta_end), scale="utc")
++        tl_start = _read_time(str(_meta_start))
++        tl_end = _read_time(str(_meta_end))
+     elif blocks:
+         tl_start = min(b.t_start for b in blocks)
+         tl_end = max(b.t_stop for b in blocks)
+@@ -546,8 +566,8 @@ def _empty_row() -> dict:
+     """
+     t0 = Time("2000-01-01T00:00:00", scale="utc")
+     return {
+-        "start_time": t0.iso,
+-        "stop_time": t0.iso,
++        "start_time": _iso_utc(t0),
++        "stop_time": _iso_utc(t0),
+         "boresight_angle": 0.0,
+         "name": "",
+         "azmin": 0.0,

@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+.DS_Store
+*.swp
+*.swo
+
+# Generated research data, plots and execution reports. Keep fixtures explicit.
+output/
+outputs/
+*.log
+
+# Local credentials / environment overrides; a documented template may be tracked.
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+

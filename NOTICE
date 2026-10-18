@@ -1,0 +1,22 @@
+Source provenance
+=================
+
+src/fyst_toast/sim_fyst.py is adapted from TOAST's SimGround operator.
+The TOAST BSD-2-Clause license and author list are retained in LICENSE
+and AUTHORS. UPSTREAM.json records the source commit and file hash.
+
+examples/02_save_trajectory.py is adapted from the local working-tree example
+fyst-trajectories/examples/fyst_to_toast/hdf5/03_save_trajectory.py.
+That example was untracked in the source repository when copied; it is not
+represented as a published upstream contribution. UPSTREAM.json records
+the exact source file hash. The source repository's BSD-3-Clause license
+is retained in LICENSES/fyst-trajectories-BSD-3-Clause.txt; this does not
+attribute authorship of the local example to the upstream authors.
+
+docs/patches/fyst-timeline-utc.patch archives the existing local changes to
+FYST's src/fyst_trajectories/overhead/io.py, against the base commit recorded
+in UPSTREAM.json. It is provided for reproducibility and is not applied
+automatically. The source repository's BSD-3-Clause license is retained above.
+
+The writer uses the installed FYST and TOAST implementations. These projects
+remain separate dependencies; they are not vendored into this repository.
