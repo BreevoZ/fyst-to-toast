@@ -9,8 +9,8 @@
 
 | 本目录文件 | 复制来源（相对 repo 根目录） | 大小 | samples | 原始 FYST flag counts |
 |---|---|---:|---:|---|
-| `fyst_ces_000_001.h5` | `output/ces/hdf5/fyst_ces_000_001.h5` | 533,001 bytes（520.509 KiB） | 2611 | `{1: 2531, 2: 80}` |
-| `fyst_daisy_003_000.h5` | `output/daisy/hdf5/fyst_daisy_003_000.h5` | 103,075 bytes（100.659 KiB） | 399 | `{1: 394, 2: 5}` |
+| `fyst_ces_000_001.h5` | `output/ces/hdf5/fyst_ces_000_001.h5`（现位于 `output/legacy/ces/hdf5/`） | 533,001 bytes（520.509 KiB） | 2611 | `{1: 2531, 2: 80}` |
+| `fyst_daisy_003_000.h5` | `output/daisy/hdf5/fyst_daisy_003_000.h5`（现位于 `output/legacy/daisy/hdf5/`） | 103,075 bytes（100.659 KiB） | 399 | `{1: 394, 2: 5}` |
 
 总大小为 636,076 bytes。实测大小与任务描述中的“524 KB / 104 KB”不同，以以上精确
 bytes 为准；样本数、flag counts 和下述运动特征与任务描述相符。
@@ -79,7 +79,7 @@ python scripts/save_trajectory_h5.py \
 ```
 
 当时 `--schedule` 默认取各 trajectory 同目录的 `schedule.ecsv`；`--output-dir`
-默认分别为本 repo 的 `output/ces/hdf5`、`output/daisy/hdf5`；固定 `--roll-deg 0`。
+当时默认分别为本 repo 的 `output/ces/hdf5`、`output/daisy/hdf5`（2026-10-19 起移至 `output/legacy/`；writer 的默认输出现改为输入 ECSV 同目录的 `hdf5/`）；固定 `--roll-deg 0`。
 写入版本为 **TOAST 3.0.5**，两份 H5 的根属性 `toast_version` 也实测为 `3.0.5`，
 `toast_format_version` 为 `2`。
 

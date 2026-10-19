@@ -47,7 +47,7 @@ ECSV 可加 `--no-metadata --no-schema` 缩短输出；`--full` 保留数值精�
 逐点比较 writer 的 H5 与输入 trajectory，结果 JSON 输出到 stdout：
 
 ```bash
-python tools/check_writer_roundtrip.py /path/to/fyst_trajectory.ecsv output/ces/hdf5
+python tools/check_writer_roundtrip.py /path/to/fyst_trajectory.ecsv /path/to/hdf5
 ```
 
 从其他 cwd 运行时，给脚本和输入传绝对路径即可，无需修改 `sys.path`。

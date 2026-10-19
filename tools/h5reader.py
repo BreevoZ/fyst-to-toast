@@ -1,6 +1,6 @@
 """只读 HDF5 全屏浏览器；Tab 文件树，Enter 完整值，m metadata，q 恢复 terminal.
 
-python h5reader.py output/daisy/hdf5/fyst_daisy_000_000.h5
+python h5reader.py data/fyst_daisy_003_000.h5
 python h5reader.py file.h5 --tree
 python h5reader.py file.h5 --node /shared/boresight_azel
 python h5reader.py file.h5 --view text --rows 5

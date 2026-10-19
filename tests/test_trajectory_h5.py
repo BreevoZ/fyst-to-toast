@@ -32,9 +32,10 @@ iers.conf.auto_download = False
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_ROOT = REPO / "data"
-# This override only controls optional writer outputs, never committed samples.
+# Optional pre-upgrade writer outputs (the source of data/); never committed samples.
+LEGACY_OUTPUT = REPO / "output" / "legacy"
 INPUT_ROOT = Path(
-    os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", REPO / "output")
+    os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", LEGACY_OUTPUT)
 ).resolve()
 CES_FILES = [f"ces/hdf5/fyst_ces_000_{i:03d}.h5" for i in range(3)]
 DAISY_FILES = [f"daisy/hdf5/fyst_daisy_{i:03d}_000.h5" for i in range(4)]
@@ -80,7 +81,7 @@ def input_path(relative):
 def protect_inputs_and_disable_network():
     paths = [SAMPLE_ROOT / name for name in SAMPLE_EXPECTATIONS]
     # Protect local outputs too, even while the override points at an empty dir.
-    for root in (REPO / "output", INPUT_ROOT):
+    for root in (LEGACY_OUTPUT, INPUT_ROOT):
         paths.extend(root / p for p in CES_FILES + DAISY_FILES)
     before = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths if p.is_file()

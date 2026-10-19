@@ -39,7 +39,7 @@ def parse_args():
         help="原生 timeline ECSV；默认 trajectory 同目录的 schedule.ecsv",
     )
     parser.add_argument(
-        "--output-dir", type=Path, help="默认写到本 repo 的 output/<case>/hdf5"
+        "--output-dir", type=Path, help="默认写到输入 ECSV 同目录的 hdf5/"
     )
     parser.add_argument(
         "--iers-file",
@@ -133,7 +133,7 @@ def main():
     folder = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
-        else Path(__file__).resolve().parents[1] / "output" / case / "hdf5"
+        else source.parent / "hdf5"
     )
     expected_paths = [
         folder / name for name in [*names, "files.json", "writer_report.json"]
