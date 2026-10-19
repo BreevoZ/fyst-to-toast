@@ -14,11 +14,13 @@ writer 已能保存原生 TOAST Observation HDF5，但它独立于 `SimFYST`。
 fyst_toast/
 ├── src/fyst_toast/
 │   ├── __init__.py                 # 版本；不会主动 import TOAST / MPI
+│   ├── generate.py
 │   ├── trajectory_h5.py           # trajectory H5 writer / loader
 │   └── sim_fyst.py                 # 当前 CES baseline；未来的轨迹输入 operator
 ├── examples/
 │   └── 01_ces_baseline.py          # SimGround 与 SimFYST 的小规模行为对照
 ├── scripts/
+│   ├── generate_trajectory.py
 │   └── save_trajectory_h5.py       # 复用已有 writer；ECSV → TOAST Observation H5
 ├── tools/check_writer_roundtrip.py # 原生 LoadHDF5 读回，与输入数组逐点比较
 ├── docs/

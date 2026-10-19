@@ -21,6 +21,72 @@ if TYPE_CHECKING:
     from astropy.units import Quantity
 
 
+# Per-sample ECSV contract shared by the generator and writer.
+ECSV_TIME_S = "time_s"
+ECSV_BLOCK_TIME_S = "block_time_s"
+ECSV_TIMESTAMP_UNIX_S = "timestamp_unix_s"
+ECSV_AZ_DEG = "az_deg"
+ECSV_EL_DEG = "el_deg"
+ECSV_AZ_VELOCITY = "az_velocity"
+ECSV_EL_VELOCITY = "el_velocity"
+ECSV_SCAN_FLAG = "scan_flag"
+ECSV_SCAN_INDEX = "scan_index"
+ECSV_SUBSCAN_INDEX = "subscan_index"
+ECSV_CASE = "case"
+ECSV_COORDINATE_FRAME = "coordinate_frame"
+ECSV_START_UTC = "start_utc"
+ECSV_GENERATOR = "generator"
+ECSV_SOURCE_SCHEDULE_SHA256 = "source_schedule_sha256"
+ECSV_BLOCKS = "blocks"
+ECSV_TIME_NOTE = "time_note"
+ECSV_FIRST = "first"
+ECSV_LAST = "last"
+ECSV_START_S = "start_s"
+ECSV_STOP_S = "stop_s"
+ECSV_FIRST_SAMPLE_S = "first_sample_s"
+ECSV_LAST_SAMPLE_S = "last_sample_s"
+ECSV_SAMPLES = "samples"
+ECSV_NATIVE_TIMESTEP_S = "native_timestep_s"
+ECSV_REQUESTED_TIMESTEP_S = "requested_timestep_s"
+
+TRAJECTORY_COLUMNS = (
+    ECSV_TIME_S,
+    ECSV_BLOCK_TIME_S,
+    ECSV_TIMESTAMP_UNIX_S,
+    ECSV_AZ_DEG,
+    ECSV_EL_DEG,
+    ECSV_AZ_VELOCITY,
+    ECSV_EL_VELOCITY,
+    ECSV_SCAN_FLAG,
+    ECSV_SCAN_INDEX,
+    ECSV_SUBSCAN_INDEX,
+)
+
+TRAJECTORY_META_KEYS = (
+    ECSV_CASE,
+    ECSV_COORDINATE_FRAME,
+    ECSV_START_UTC,
+    ECSV_GENERATOR,
+    ECSV_SOURCE_SCHEDULE_SHA256,
+    ECSV_BLOCKS,
+    ECSV_TIME_NOTE,
+)
+
+TRAJECTORY_BLOCK_KEYS = (
+    ECSV_SCAN_INDEX,
+    ECSV_SUBSCAN_INDEX,
+    ECSV_FIRST,
+    ECSV_LAST,
+    ECSV_START_S,
+    ECSV_STOP_S,
+    ECSV_FIRST_SAMPLE_S,
+    ECSV_LAST_SAMPLE_S,
+    ECSV_SAMPLES,
+    ECSV_NATIVE_TIMESTEP_S,
+    ECSV_REQUESTED_TIMESTEP_S,
+)
+
+
 _TRAJECTORY_FIELDS = (
     "times",
     "azimuth",
@@ -240,7 +306,7 @@ def write_trajectory_blocks(
     from fyst_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
 
     folder = Path(output_dir)
-    case = samples.meta["case"]
+    case = samples.meta[ECSV_CASE]
     # 1. 五个 detectors 是 TOAST 自带的示意 focalplane。
     site = GroundSite(
         site_name,
@@ -251,16 +317,19 @@ def write_trajectory_blocks(
     data = Data(Comm(world=None))
     try:
         files = []
-        for block in samples.meta["blocks"]:
+        for block in samples.meta[ECSV_BLOCKS]:
             # 这是读取第二步原封保存的一块数组，不是重新决定如何划分 block。
-            part = samples[block["first"] : block["last"]]
-            times = part["timestamp_unix_s"].to_value(u.s)
-            az, el = part["az_deg"].to_value(u.rad), part["el_deg"].to_value(u.rad)
-            dt = np.diff(part["block_time_s"].to_value(u.s))
-            np.testing.assert_allclose(
-                dt, block["native_timestep_s"], rtol=0, atol=1e-9
+            part = samples[block[ECSV_FIRST] : block[ECSV_LAST]]
+            times = part[ECSV_TIMESTAMP_UNIX_S].to_value(u.s)
+            az, el = (
+                part[ECSV_AZ_DEG].to_value(u.rad),
+                part[ECSV_EL_DEG].to_value(u.rad),
             )
-            rate = (1 / block["native_timestep_s"]) * u.Hz
+            dt = np.diff(part[ECSV_BLOCK_TIME_S].to_value(u.s))
+            np.testing.assert_allclose(
+                dt, block[ECSV_NATIVE_TIMESTEP_S], rtol=0, atol=1e-9
+            )
+            rate = (1 / block[ECSV_NATIVE_TIMESTEP_S]) * u.Hz
             full = fake_hexagon_focalplane(n_pix=7, width=0.1 * u.deg, sample_rate=rate)
             fp = Focalplane(
                 detector_data=full.detector_data[:5],
@@ -268,7 +337,7 @@ def write_trajectory_blocks(
                 field_of_view=full.field_of_view,
             )
             telescope = Telescope("FYST-trajectory-demo", site=site, focalplane=fp)
-            name = f"fyst_{case}_{block['scan_index']:03d}_{block['subscan_index']:03d}"
+            name = f"fyst_{case}_{block[ECSV_SCAN_INDEX]:03d}_{block[ECSV_SUBSCAN_INDEX]:03d}"
             session = Session(
                 name=name,
                 start=datetime.fromtimestamp(times[0], tz=timezone.utc),
@@ -290,7 +359,7 @@ def write_trajectory_blocks(
             position, velocity = site.position_velocity(times)
 
             # 3. FYST enum → TOAST bitmask；原始枚举另存，不会丢掉换向点。
-            original_flags = np.asarray(part["scan_flag"])
+            original_flags = np.asarray(part[ECSV_SCAN_FLAG])
             flags = np.zeros(len(part), dtype=np.uint8)
             flags[original_flags == SCAN_FLAG_TURNAROUND] = (
                 defaults.shared_mask_unstable_scanrate
@@ -314,15 +383,15 @@ def write_trajectory_blocks(
                 zip(
                     _TRAJECTORY_FIELDS[3:],
                     (
-                        part["time_s"].to_value(u.s),
-                        part["block_time_s"].to_value(u.s),
-                        part["az_deg"].to_value(u.deg),
-                        part["el_deg"].to_value(u.deg),
-                        part["az_velocity"].to_value(u.deg / u.s),
-                        part["el_velocity"].to_value(u.deg / u.s),
+                        part[ECSV_TIME_S].to_value(u.s),
+                        part[ECSV_BLOCK_TIME_S].to_value(u.s),
+                        part[ECSV_AZ_DEG].to_value(u.deg),
+                        part[ECSV_EL_DEG].to_value(u.deg),
+                        part[ECSV_AZ_VELOCITY].to_value(u.deg / u.s),
+                        part[ECSV_EL_VELOCITY].to_value(u.deg / u.s),
                         original_flags,
-                        np.asarray(part["scan_index"]),
-                        np.asarray(part["subscan_index"]),
+                        np.asarray(part[ECSV_SCAN_INDEX]),
+                        np.asarray(part[ECSV_SUBSCAN_INDEX]),
                     ),
                     strict=True,
                 )
@@ -337,7 +406,7 @@ def write_trajectory_blocks(
                 {
                     "case": case,
                     "source_sha256": source_sha256,
-                    "start_utc": samples.meta["start_utc"],
+                    "start_utc": samples.meta[ECSV_START_UTC],
                     "block": block,
                     "roll_deg": roll_deg,
                     "sample_rate_hz": rate.to_value(u.Hz),

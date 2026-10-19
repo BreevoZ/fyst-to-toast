@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Only for future trajectory-generation scripts and the optional contract test.
+# Used by fyst_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
 # Also requires the current UTC-offset patch in docs/patches; pip cannot express it.
 fyst = ["fyst-trajectories>=0.10,<0.11"]
 
