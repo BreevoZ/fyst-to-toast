@@ -1,4 +1,4 @@
-"""B2.1: native IO, independent byte comparisons, and corrupted scratch copies."""
+"""Committed samples always run; full writer outputs add optional coverage."""
 
 import os
 
@@ -11,6 +11,7 @@ import hashlib
 import json
 import shutil
 import socket
+from itertools import pairwise
 from pathlib import Path
 
 import h5py
@@ -24,9 +25,23 @@ from fyst_toast.trajectory_input import _check_sample_rate, _load_trajectory_blo
 iers.conf.auto_download = False
 
 REPO = Path(__file__).resolve().parents[1]
+SAMPLE_ROOT = REPO / "data"
+# This override only controls optional writer outputs, never committed samples.
 INPUT_ROOT = Path(os.environ.get("FYST_TOAST_TEST_OUTPUT", REPO / "output")).resolve()
 CES_FILES = [f"ces/hdf5/fyst_ces_000_{i:03d}.h5" for i in range(3)]
 DAISY_FILES = [f"daisy/hdf5/fyst_daisy_{i:03d}_000.h5" for i in range(4)]
+SAMPLE_EXPECTATIONS = {
+    "fyst_ces_000_001.h5": {
+        "samples": 2611,
+        "flags": {1: 2531, 2: 80},
+        "rate_hz": 9.999997341770571,
+    },
+    "fyst_daisy_003_000.h5": {
+        "samples": 399,
+        "flags": {1: 394, 2: 5},
+        "rate_hz": 10.000000011980832,
+    },
+}
 FIELDS = (
     "times",
     "azimuth",
@@ -44,6 +59,7 @@ FIELDS = (
 
 
 def input_path(relative):
+    """Only the optional full-output tests may skip for missing input."""
     path = INPUT_ROOT / relative
     if not path.is_file():
         pytest.skip(
@@ -54,7 +70,10 @@ def input_path(relative):
 
 @pytest.fixture(scope="session", autouse=True)
 def protect_inputs_and_disable_network():
-    paths = [INPUT_ROOT / p for p in CES_FILES + DAISY_FILES]
+    paths = [SAMPLE_ROOT / name for name in SAMPLE_EXPECTATIONS]
+    # Protect local outputs too, even while the override points at an empty dir.
+    for root in (REPO / "output", INPUT_ROOT):
+        paths.extend(root / p for p in CES_FILES + DAISY_FILES)
     before = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths if p.is_file()
     }
@@ -74,7 +93,16 @@ def protect_inputs_and_disable_network():
 
 @pytest.fixture
 def ces_path():
-    return input_path(CES_FILES[0])
+    path = SAMPLE_ROOT / "fyst_ces_000_001.h5"
+    assert path.is_file(), f"Missing committed sample: {path}"
+    return path
+
+
+@pytest.fixture(params=list(SAMPLE_EXPECTATIONS))
+def sample_path(request):
+    path = SAMPLE_ROOT / request.param
+    assert path.is_file(), f"Missing committed sample: {path}"
+    return path
 
 
 def refresh_manifest(saved):
@@ -86,9 +114,8 @@ def refresh_manifest(saved):
     saved["metadata/other"].attrs["shared_array_sha256"] = json.dumps(manifest)
 
 
-@pytest.mark.parametrize("relative", [CES_FILES[0], *DAISY_FILES])
-def test_original_arrays_and_metadata(relative):
-    path = input_path(relative)
+def assert_original_arrays_and_metadata(path):
+    """h5py is the independent reference for native LoadHDF5 output."""
     block = _load_trajectory_block(path)
     with h5py.File(path, "r") as saved:
         assert set(block.arrays) == set(FIELDS)
@@ -126,8 +153,42 @@ def test_original_arrays_and_metadata(relative):
     )
 
 
-def test_ces_clock_and_nominal_rate(ces_path):
-    block = _load_trajectory_block(ces_path)
+def test_committed_arrays_and_metadata(sample_path):
+    assert_original_arrays_and_metadata(sample_path)
+
+
+@pytest.mark.parametrize("relative", CES_FILES + DAISY_FILES)
+def test_optional_output_arrays_and_metadata(relative):
+    assert_original_arrays_and_metadata(input_path(relative))
+
+
+def test_committed_clock_and_nominal_rate(sample_path):
+    expected = SAMPLE_EXPECTATIONS[sample_path.name]
+    block = _load_trajectory_block(sample_path)
+    times = block.arrays["times"]
+    assert len(times) == expected["samples"]
+    flags, counts = np.unique(block.arrays["fyst_scan_flag"], return_counts=True)
+    assert dict(zip(flags.tolist(), counts.tolist())) == expected["flags"]
+    assert np.all(np.diff(times) > 0)
+    assert block.actual_rate_hz == pytest.approx(expected["rate_hz"], rel=0, abs=1e-12)
+    assert block.time_tolerance_s == 2 * np.spacing(abs(times)).max()
+    assert block.max_phase_residual_s <= block.time_tolerance_s
+    numbers = _check_sample_rate(10, block.actual_rate_hz)
+    assert numbers["nominal_rate_hz"] == 10
+    assert numbers["actual_rate_hz"] == block.actual_rate_hz
+    assert numbers["relative_error"] <= numbers["rtol"] == 1e-6
+    with pytest.raises(ValueError, match="Nominal sample rate 20.*actual"):
+        _check_sample_rate(20, block.actual_rate_hz)
+    if sample_path.name == "fyst_ces_000_001.h5":
+        with pytest.raises(ValueError, match="rtol 1e-08"):
+            _check_sample_rate(10, block.actual_rate_hz, rtol=1e-8)
+    assert _check_sample_rate(10, 10, rtol=0)["relative_error"] == 0
+    print(f"{sample_path.name}: flags={expected['flags']}; 10 Hz PASS, 20 Hz rejected")
+
+
+def test_optional_first_ces_clock_and_nominal_rate():
+    # Retain the original 850-sample case alongside the new default CES block.
+    block = _load_trajectory_block(input_path(CES_FILES[0]))
     assert len(block.arrays["times"]) == 850
     flags, counts = np.unique(block.arrays["fyst_scan_flag"], return_counts=True)
     assert dict(zip(flags.tolist(), counts.tolist())) == {1: 830, 2: 20}
@@ -146,6 +207,36 @@ def test_ces_clock_and_nominal_rate(ces_path):
     print(f"CES flags={{1: 830, 2: 20}}; 10 Hz PASS, 20 Hz rejected; {numbers}")
 
 
+def test_ces_sweeps_and_complete_turnarounds(ces_path):
+    block = _load_trajectory_block(ces_path)
+    flags = block.arrays["fyst_scan_flag"]
+    velocity = block.arrays["fyst_az_velocity_deg_s"]
+    # Runs use half-open sample spans [first, last), without changing the input.
+    edges = np.r_[0, np.flatnonzero(flags[1:] != flags[:-1]) + 1, len(flags)]
+    assert edges.tolist() == [0, 477, 497, 1175, 1195, 1873, 1893, 2571, 2591, 2611]
+    assert flags[edges[:-1]].tolist() == [1, 2, 1, 2, 1, 2, 1, 2, 1]
+    for run, (first, last) in enumerate(pairwise(edges)):
+        if run % 2 == 0:
+            sign = [-1, 1, -1, 1, -1][run // 2]
+            assert np.all(np.sign(velocity[first:last]) == sign)
+        else:
+            assert last - first == 20
+            assert np.sign(velocity[first]) == np.sign(velocity[first - 1])
+            assert np.sign(velocity[last - 1]) == np.sign(velocity[last])
+            assert np.sign(velocity[first]) == -np.sign(velocity[last - 1])
+    assert np.all(block.arrays["fyst_el_deg"] == 50)
+
+
+def test_daisy_starts_in_turnaround_and_varies_elevation():
+    block = _load_trajectory_block(SAMPLE_ROOT / "fyst_daisy_003_000.h5")
+    flags = block.arrays["fyst_scan_flag"]
+    assert np.all(flags[:5] == 2)
+    assert np.all(flags[5:] == 1)
+    elevation = block.arrays["fyst_el_deg"]
+    assert elevation.min() == pytest.approx(79.04457108202241, rel=0, abs=1e-12)
+    assert elevation.max() == pytest.approx(80.51415846553718, rel=0, abs=1e-12)
+
+
 @pytest.mark.parametrize(
     "damage, message",
     [
@@ -155,15 +246,18 @@ def test_ces_clock_and_nominal_rate(ces_path):
         ("unknown_flag", r"Unknown fyst_scan_flag values: \[7\]"),
         ("hash", "hash mismatch for fyst_az_deg"),
         ("derived_hash", "hash mismatch for boresight_azel"),
-        ("samples", r"block.samples must equal N=850"),
+        ("samples", r"block.samples must equal N={samples}"),
         ("nonfinite", "fyst_el_deg: all values must be finite"),
         ("shape", "fyst_el_deg: expected a 1-D array"),
         ("json", "trajectory_info must be valid JSON"),
     ],
 )
-def test_reject_corrupted_copy(ces_path, tmp_path, damage, message):
+def test_reject_corrupted_copy(sample_path, tmp_path, damage, message):
     path = tmp_path / "corrupted.h5"
-    shutil.copyfile(ces_path, path)
+    shutil.copyfile(sample_path, path)
+    message = message.replace(
+        "{samples}", str(SAMPLE_EXPECTATIONS[sample_path.name]["samples"])
+    )
     with h5py.File(path, "r+") as saved:
         shared = saved["shared"]
         metadata = saved["metadata/other"].attrs
@@ -172,7 +266,8 @@ def test_reject_corrupted_copy(ces_path, tmp_path, damage, message):
         elif damage == "non_increasing":
             shared["times"][10] = shared["times"][9]
         elif damage == "gap":
-            shared["times"][425:] += 0.1
+            midpoint = len(shared["times"]) // 2
+            shared["times"][midpoint:] += 0.1
         elif damage == "unknown_flag":
             shared["fyst_scan_flag"][10] = 7
         elif damage == "hash":
@@ -238,7 +333,7 @@ def test_temporary_data_cleanup(ces_path, monkeypatch, mode):
     monkeypatch.setattr(Data, "clear", clear)
     if mode == "success":
         block = _load_trajectory_block(ces_path)
-        assert block.arrays["times"].size == 850
+        assert block.arrays["times"].size == 2611
     elif mode == "load_error":
         with pytest.raises(RuntimeError, match="Synthetic failure"):
             _load_trajectory_block(ces_path)
