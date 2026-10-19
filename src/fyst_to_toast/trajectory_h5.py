@@ -303,7 +303,11 @@ def write_trajectory_blocks(
     from toast.mpi import Comm
     from toast.observation import default_values as defaults
 
-    from fyst_to_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
+    from fyst_to_toast.fyst_flags import (
+        SCAN_FLAG_SCIENCE,
+        SCAN_FLAG_TURNAROUND,
+        to_toast_flags,
+    )
 
     folder = Path(output_dir)
     case = samples.meta[ECSV_CASE]
@@ -360,13 +364,11 @@ def write_trajectory_blocks(
 
             # 3. FYST enum → TOAST bitmask；原始枚举另存，不会丢掉换向点。
             original_flags = np.asarray(part[ECSV_SCAN_FLAG])
-            flags = np.zeros(len(part), dtype=np.uint8)
-            flags[original_flags == SCAN_FLAG_TURNAROUND] = (
-                defaults.shared_mask_unstable_scanrate
+            flags = to_toast_flags(
+                original_flags,
+                turnaround_mask=defaults.shared_mask_unstable_scanrate,
+                invalid_mask=defaults.shared_mask_invalid,
             )
-            flags[
-                ~np.isin(original_flags, [SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND])
-            ] = defaults.shared_mask_invalid
             # Keep the original shared-column order as well as the array bytes.
             # The loader and writer use the same 12-field definition above.
             arrays = dict(zip(_TRAJECTORY_FIELDS[:3], (times, az, el)))

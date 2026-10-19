@@ -70,6 +70,7 @@ from .fyst_flags import (
     SCAN_FLAG_SCIENCE,
     SCAN_FLAG_TURNAROUND,
     SCAN_FLAG_UNCLASSIFIED,
+    to_toast_flags,
 )
 from .trajectory_h5 import (
     _TRAJECTORY_FIELDS,
@@ -1519,9 +1520,12 @@ class SimFYST(Operator):
                     self.fyst_invalid_interval,
                 ),
             }
-            flags = np.zeros(len(times), dtype=np.uint8)
-            flags[classes["turnaround"][0]] = self.turnaround_mask
-            flags[classes["invalid"][0]] = defaults.shared_mask_invalid
+            # Same mapping as the writer; the loader already rejected values outside 0-3.
+            flags = to_toast_flags(
+                raw,
+                turnaround_mask=self.turnaround_mask,
+                invalid_mask=defaults.shared_mask_invalid,
+            )
             ob.shared.create_column(
                 self.shared_flags, shape=flags.shape, dtype=flags.dtype
             )
