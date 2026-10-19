@@ -18,7 +18,7 @@ writer，也能执行核心 loader 检查。
 - [tests/test_trajectory_h5.py](../../tests/test_trajectory_h5.py)：核心正例固定
   从 `data/` 读，逐字段对照独立 h5py 读取的 dtype / shape / bytes；负例只修改
   `tmp_path` 下的副本。保留原 CES 首块时钟检查和四个 Daisy blocks，扩展可选
-  array 检查到全部 7 个 `output/` H5。`FYST_TOAST_TEST_OUTPUT` 只控制可选输入；
+  array 检查到全部 7 个 `output/` H5。`FYST_TO_TOAST_TEST_OUTPUT` 只控制可选输入；
   缺失时给出 skip 原因，缺少 `data/` fixture 则失败。
 
 目的在于提供稳定的 loader 回归输入，以及后续 SimFYST B2/B3 examples 的起点。
@@ -54,10 +54,10 @@ export PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 AUDIT="$PWD/output/codex/R4_sample_inputs"
 export MPLCONFIGDIR="$AUDIT/cache/matplotlib"
 export XDG_CACHE_HOME="$AUDIT/cache" NUMBA_CACHE_DIR="$AUDIT/cache/numba"
-unset FYST_TOAST_TEST_OUTPUT
+unset FYST_TO_TOAST_TEST_OUTPUT
 python -m pytest tests/test_trajectory_h5.py -q -s -rs -p no:cacheprovider
 R4_EMPTY_OUTPUT="$(mktemp -d)"
-FYST_TOAST_TEST_OUTPUT="$R4_EMPTY_OUTPUT" \
+FYST_TO_TOAST_TEST_OUTPUT="$R4_EMPTY_OUTPUT" \
   python -m pytest tests/test_trajectory_h5.py -q -s -rs -p no:cacheprovider
 rmdir "$R4_EMPTY_OUTPUT"
 python -m ruff check tests/test_trajectory_h5.py

@@ -5,7 +5,7 @@ Python 使用现有 `fyst` 环境；没有修改外部 repo、安装依赖或下
 
 ## 为什么要改
 
-以前在另一个 repo 生成后复制 ECSV，现在在 `fyst_toast` 内调用安装的 FYST，直接
+以前在另一个 repo 生成后复制 ECSV，现在在 `fyst-to-toast` 内调用安装的 FYST，直接
 保存 native scheduler / trajectory 的结果。library 提供可复用函数，thin CLI 只管
 参数、进程环境和 IERS；notebook / tests 也可调用同一份核心。`examples/` 留给教学 demo。
 
@@ -13,7 +13,7 @@ Python 使用现有 `fyst` 环境；没有修改外部 repo、安装依赖或下
 
 G1 未跟踪的 `examples/00_generate_trajectory.py` 已用普通 `mv` 搬至
 [`scripts/generate_trajectory.py`](../../scripts/generate_trajectory.py)。核心在
-[`src/fyst_toast/generate.py`](../../src/fyst_toast/generate.py)：
+[`src/fyst_to_toast/generate.py`](../../src/fyst_to_toast/generate.py)：
 
 | 函数 / 位置 | 职责 |
 |---|---|
@@ -25,7 +25,7 @@ G1 未跟踪的 `examples/00_generate_trajectory.py` 已用普通 `mv` 搬至
 | `generate.py:222`，`generate_trajectory()` | 串起各步骤、覆盖保护、写 trajectory ECSV / report，返回 report |
 
 唯一的逐样本 ECSV 字段定义在
-[`src/fyst_toast/trajectory_h5.py:25`](../../src/fyst_toast/trajectory_h5.py#L25)：
+[`src/fyst_to_toast/trajectory_h5.py:25`](../../src/fyst_to_toast/trajectory_h5.py#L25)：
 `ECSV_*` 常量及 `TRAJECTORY_COLUMNS` / `TRAJECTORY_META_KEYS` /
 `TRAJECTORY_BLOCK_KEYS`；生成器与 writer 共用它们。writer 只替换 key 引用，计算不变。
 
@@ -53,7 +53,7 @@ G1 未跟踪的 `examples/00_generate_trajectory.py` 已用普通 `mv` 搬至
   当前默认 retune=300 s、min scan=60 s、max scan=3600 s；长窗口给后续子段 / visits
   留出时间，但 science 数量也受可见性与 overhead 影响，不能仅按窗口长度除以 3600。
 - 只有 `generate.py` 在函数内 import FYST。ECSV → H5 → loader 不依赖 FYST；
-  `import fyst_toast`、`import fyst_toast.trajectory_h5` 均不导入 FYST / TOAST。
+  `import fyst_to_toast`、`import fyst_to_toast.trajectory_h5` 均不导入 FYST / TOAST。
   library 不改 MPI、线程或 IERS 全局设置，由调用者配置；CLI 已配置离线 IERS。
 
 **新共同默认值是 10800 s（3 h）**，为给定候选中两例均至少三个 science blocks 的最小值。

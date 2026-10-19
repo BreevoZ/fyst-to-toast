@@ -50,8 +50,8 @@ arrays 可以承载其他 patterns。writer 已保存的 TOAST H5 可以提供�
 |---|---|---|
 | FYST repo | scheduler、science / overhead blocks、轨迹与原始分类 | 复用安装的原生实现，不在此重写 |
 | `scripts/save_trajectory_h5.py` | ECSV 到示意 Observation 的字段适配，调用原生 IO | 已迁移，路径通过 CLI 指定 |
-| `src/fyst_toast/trajectory_h5.py` | 私有单 block loader：复用 `LoadHDF5`，校验并原样复制 12 个轨迹数组、来源 metadata / site，检查均匀时钟及 nominal rate（默认 `rtol=1e-6`） | B2.1 独立入口；`SimFYST` 尚未使用，见 [学习笔记](steps/01-load-trajectory-block.md) |
-| `src/fyst_toast/sim_fyst.py` | 建立供后续 operators 使用的 Data / Observations | 仍是复制的 CES baseline |
+| `src/fyst_to_toast/trajectory_h5.py` | 私有单 block loader：复用 `LoadHDF5`，校验并原样复制 12 个轨迹数组、来源 metadata / site，检查均匀时钟及 nominal rate（默认 `rtol=1e-6`） | B2.1 独立入口；`SimFYST` 尚未使用，见 [学习笔记](steps/01-load-trajectory-block.md) |
+| `src/fyst_to_toast/sim_fyst.py` | 建立供后续 operators 使用的 Data / Observations | 仍是复制的 CES baseline |
 | TOAST dependency | Data、Observation、Telescope、坐标变换、Save/LoadHDF5 等 | 通过正常 imports 复用 |
 | `tools/check_writer_roundtrip.py` | 用原生 loader 检查存取和输入保真 | 验收工具，不是新的科学 reader |
 

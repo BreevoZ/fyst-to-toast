@@ -41,7 +41,7 @@ def main():
         os.environ[key] = "1"
     os.environ["TOAST_LOGLEVEL"] = "WARNING"
     for key in ("MPLCONFIGDIR", "XDG_CACHE_HOME", "NUMBA_CACHE_DIR"):
-        cache = Path(gettempdir()) / "fyst-toast" / key.lower()
+        cache = Path(gettempdir()) / "fyst-to-toast" / key.lower()
         cache.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault(key, str(cache))
 
@@ -54,7 +54,7 @@ def main():
     from toast.mpi import Comm
     from toast.observation import default_values as defaults
 
-    from fyst_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
+    from fyst_to_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
 
     samples = QTable.read(source)
     blocks = samples.meta["blocks"]

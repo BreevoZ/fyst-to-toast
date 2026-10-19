@@ -1,13 +1,13 @@
 # R2：记录新 FYST 依赖，并复跑 writer
 
-执行：2026-10-18；`fyst_toast` 起点为 `main@19d5d1e`。这是依赖记录和兼容性验证，
+执行：2026-10-18；`fyst-to-toast` 起点为 `main@19d5d1e`。这是依赖记录和兼容性验证，
 没有修改 writer、loader、SimFYST 或已提交的 H5 fixtures。
 
 ## 为什么要改 / 目的
 
 workspace 迁移后有四类记录过期：补丁仍针对旧 base `2d0a3d3`；`UPSTREAM.json`
 仍把 0.8.0 当作当前依赖；writer extra 仍限制 0.8.x；运行示例仍指向已搬走的 ECSV。
-FYST repo 不属于用户，不能在那里 commit；因此由 `fyst_toast` 保存当前未提交修复，
+FYST repo 不属于用户，不能在那里 commit；因此由 `fyst-to-toast` 保存当前未提交修复，
 让别人能重建相同依赖，并用执行结果确认旧输入在新依赖上仍写出相同数据。
 
 ## 改了什么
@@ -44,7 +44,7 @@ FYST repo 不属于用户，不能在那里 commit；因此由 `fyst_toast` 保�
 
 ## 怎么验证的（实际执行）
 
-以下从 `fyst_toast/` 根目录执行；本轮 Python 为 env `fyst` 的 Python 3.12.14，
+以下从 `fyst-to-toast/` 根目录执行；本轮 Python 为 env `fyst` 的 Python 3.12.14，
 TOAST 3.0.5。关闭 MPI / 数值多线程及 bytecode 写入；writer 自身关闭 IERS 下载。
 
 ```bash
@@ -106,7 +106,7 @@ python "$R2_OUTPUT/compare_writer.py"
 3. 回归和变更范围检查：
 
 ```bash
-FYST_TOAST_TEST_OUTPUT="$PWD/$R2_OUTPUT" python -m pytest tests/ -q \
+FYST_TO_TOAST_TEST_OUTPUT="$PWD/$R2_OUTPUT" python -m pytest tests/ -q \
   -o cache_dir="$R2_OUTPUT/pytest_cache" --basetemp="$R2_OUTPUT/pytest_tmp" \
   --junitxml="$R2_OUTPUT/pytest.xml"
 python examples/01_ces_baseline.py --output-dir "$R2_OUTPUT/ces_baseline"

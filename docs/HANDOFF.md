@@ -18,7 +18,7 @@ writer 和 TOAST classes，不为了 demo 重造算法或人为改变 block 边�
 
 | 部分 | 当前行为 | 尚未完成 |
 |---|---|---|
-| `src/fyst_toast/sim_fyst.py` | 复制 `SimGround`，调整类名、imports 和阶段说明；仍由 schedule 生成 CES | 无 `trajectory_file` 参数，无 trajectory reader |
+| `src/fyst_to_toast/sim_fyst.py` | 复制 `SimGround`，调整类名、imports 和阶段说明；仍由 schedule 生成 CES | 无 `trajectory_file` 参数，无 trajectory reader |
 | `examples/01_ces_baseline.py` | 同一短 CES 分别运行 `SimGround` / `SimFYST`，比较 Observation 内容 | 不是 FYST trajectory 保真测试，不证明 MPI 兼容 |
 | `scripts/save_trajectory_h5.py` | 从既有 FYST trajectory ECSV 创建示意 Observation，再调用原生 `SaveHDF5` | 不经过 `SimFYST`，不实现新的 reader，不运行 sky / noise |
 

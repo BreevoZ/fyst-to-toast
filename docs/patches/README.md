@@ -3,7 +3,7 @@
 TOAST 的 `datetime.fromisoformat(...).timestamp()` 会把没有 offset 的 naive datetime
 按主机本地时区解释。当前补丁让 FYST 输出带 `+00:00` 的微秒 UTC 文本，并使 reader
 兼容旧文本及带 offset 的输入。版本号无法表达这项未提交修改；FYST repo 不属于用户，
-不得在那里 commit，因此 `fyst_toast` 保存可版本管理的补丁。
+不得在那里 commit，因此 `fyst-to-toast` 保存可版本管理的补丁。
 
 | 用途 | 补丁 | base commit / 版本 |
 |---|---|---|
@@ -26,14 +26,14 @@ SHA-256（补丁文件本身）：
 ## 新机器重建当前依赖
 
 以下是新机器操作说明，本轮未执行网络或安装命令。在 workspace 根目录执行；
-已有 `fyst_toast/`，目标 `fyst-trajectories/` 必须尚不存在，不要对正在使用的 checkout 操作：
+已有 `fyst-to-toast/`，目标 `fyst-trajectories/` 必须尚不存在，不要对正在使用的 checkout 操作：
 
 ```bash
 set -e
 git clone https://github.com/ccatobs/fyst-trajectories.git fyst-trajectories
 git -C fyst-trajectories checkout f095c5176ab5f8b53aa19a549dc871ef2e91feeb
-git -C fyst-trajectories apply --check ../fyst_toast/docs/patches/fyst-trajectories-utc-offset_f095c51.patch
-git -C fyst-trajectories apply ../fyst_toast/docs/patches/fyst-trajectories-utc-offset_f095c51.patch
+git -C fyst-trajectories apply --check ../fyst-to-toast/docs/patches/fyst-trajectories-utc-offset_f095c51.patch
+git -C fyst-trajectories apply ../fyst-to-toast/docs/patches/fyst-trajectories-utc-offset_f095c51.patch
 ```
 
 在准备好运行依赖和 FYST build-system 依赖（包括 hatchling）的目标环境中做 editable

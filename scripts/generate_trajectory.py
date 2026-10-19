@@ -17,7 +17,7 @@ os.environ["MPI_DISABLE"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
-from fyst_toast.generate import (
+from fyst_to_toast.generate import (
     DEFAULT_DURATION_S,
     DEFAULT_START,
     OUTPUT_NAMES,
@@ -65,7 +65,7 @@ def main():
             parser.error("输出不能覆盖 IERS 输入文件")
 
     for key in ("MPLCONFIGDIR", "XDG_CACHE_HOME", "NUMBA_CACHE_DIR"):
-        default_cache = Path(gettempdir()) / "fyst-toast" / key.lower()
+        default_cache = Path(gettempdir()) / "fyst-to-toast" / key.lower()
         cache = Path(os.environ.setdefault(key, str(default_cache)))
         cache.mkdir(parents=True, exist_ok=True)
 

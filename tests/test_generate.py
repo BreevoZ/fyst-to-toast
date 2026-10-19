@@ -21,12 +21,12 @@ pytest.importorskip(
     exc_type=ImportError,
 )
 
-from fyst_toast import trajectory_h5 as schema
-from fyst_toast.generate import generate_trajectory
+from fyst_to_toast import trajectory_h5 as schema
+from fyst_to_toast.generate import generate_trajectory
 
 
 def test_ces_ecsv_writer_contract(tmp_path):
-    iers_path = os.environ.get("FYST_TOAST_TEST_IERS")
+    iers_path = os.environ.get("FYST_TO_TOAST_TEST_IERS")
     with iers.conf.set_temp("auto_download", False):
         table = iers.IERS_A.open(iers_path) if iers_path else iers.IERS_Auto.open()
         with (

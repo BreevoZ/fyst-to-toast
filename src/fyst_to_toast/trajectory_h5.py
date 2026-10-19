@@ -303,7 +303,7 @@ def write_trajectory_blocks(
     from toast.mpi import Comm
     from toast.observation import default_values as defaults
 
-    from fyst_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
+    from fyst_to_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
 
     folder = Path(output_dir)
     case = samples.meta[ECSV_CASE]

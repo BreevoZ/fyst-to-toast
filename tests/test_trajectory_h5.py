@@ -22,7 +22,7 @@ from astropy.coordinates import solar_system_ephemeris
 from astropy.table import QTable
 from astropy.utils import iers
 
-from fyst_toast.trajectory_h5 import (
+from fyst_to_toast.trajectory_h5 import (
     _check_sample_rate,
     _load_trajectory_block,
     write_trajectory_blocks,
@@ -33,7 +33,9 @@ iers.conf.auto_download = False
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_ROOT = REPO / "data"
 # This override only controls optional writer outputs, never committed samples.
-INPUT_ROOT = Path(os.environ.get("FYST_TOAST_TEST_OUTPUT", REPO / "output")).resolve()
+INPUT_ROOT = Path(
+    os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", REPO / "output")
+).resolve()
 CES_FILES = [f"ces/hdf5/fyst_ces_000_{i:03d}.h5" for i in range(3)]
 DAISY_FILES = [f"daisy/hdf5/fyst_daisy_{i:03d}_000.h5" for i in range(4)]
 SAMPLE_EXPECTATIONS = {
@@ -69,7 +71,7 @@ def input_path(relative):
     path = INPUT_ROOT / relative
     if not path.is_file():
         pytest.skip(
-            f"Writer H5 absent: {path}; set FYST_TOAST_TEST_OUTPUT to supply it"
+            f"Writer H5 absent: {path}; set FYST_TO_TOAST_TEST_OUTPUT to supply it"
         )
     return path
 

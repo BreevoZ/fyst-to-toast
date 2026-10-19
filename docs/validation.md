@@ -32,8 +32,8 @@ working tree，并非未修改的 release。相关修改是 `src/fyst_trajectori
 在对应的历史 FYST checkout 内使用实际补丁路径：
 
 ```bash
-git apply --check /path/to/fyst_toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
-git apply /path/to/fyst_toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
+git apply --check /path/to/fyst-to-toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
+git apply /path/to/fyst-to-toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
 ```
 
 已有修复的 working tree 不要重复应用。其他版本应先核对当前实现；补丁只验证过上述
@@ -134,13 +134,13 @@ Explicit IERS-A file (both cases)
 - 在临时目录以显式输入/输出路径运行、采用 Astropy 自带 IERS 数据、再次使用
   `--overwrite`，均通过；覆盖后也通过原生读回检查。
 - 新 writer 和 roundtrip checker 通过 Ruff 检查；未为格式化而改写复制的 `SimFYST`。
-- 从 repo 外单独 `import fyst_toast`，确认没有导入 TOAST / MPI。
+- 从 repo 外单独 `import fyst_to_toast`，确认没有导入 TOAST / MPI。
 - 使用以下离线命令构建 wheel 成功，并检查 wheel 内保留全部 license / authors / NOTICE、
   正确 license expression 和 extra dependency（当时名为 `writer`，现名为 `fyst`）：
 
 ```bash
 python -m pip wheel --no-deps --no-build-isolation --no-index --no-cache-dir . \
-  --wheel-dir /tmp/fyst-toast-release-check
+  --wheel-dir /tmp/fyst-to-toast-release-check
 ```
 
 wheel 是 package 安装检查；运行本文 example 的方式仍是从 Git checkout 执行脚本。

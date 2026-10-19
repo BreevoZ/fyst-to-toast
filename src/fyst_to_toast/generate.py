@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from fyst_toast import trajectory_h5 as schema
+from fyst_to_toast import trajectory_h5 as schema
 
 DEFAULT_DURATION_S = 10800
 DEFAULT_START = {"ces": "2026-08-02T01:25:00", "daisy": "2026-03-15T04:00:00"}

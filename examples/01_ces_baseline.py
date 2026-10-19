@@ -18,7 +18,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 # TOAST import 会间接加载 Matplotlib；使用可写缓存，不在 terminal 留缓存警告。
 for key, subdir in (("MPLCONFIGDIR", "matplotlib"), ("XDG_CACHE_HOME", "cache")):
-    cache = Path(gettempdir()) / "fyst-toast" / subdir
+    cache = Path(gettempdir()) / "fyst-to-toast" / subdir
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault(key, str(cache))
 
@@ -32,7 +32,7 @@ from toast.instrument_sim import fake_boresight_focalplane
 from toast.ops import SimGround
 from toast.schedule import GroundScan, GroundSchedule
 
-from fyst_toast.sim_fyst import SimFYST
+from fyst_to_toast.sim_fyst import SimFYST
 
 iers.conf.auto_download = False
 

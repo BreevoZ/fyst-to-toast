@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from astropy.utils import iers
 
-from fyst_toast import fyst_flags
+from fyst_to_toast import fyst_flags
 
 iers.conf.auto_download = False
 pytest.importorskip(
@@ -27,7 +27,7 @@ SCHEDULE_ROOT = (
     REPO
     / Path(
         os.environ.get(
-            "FYST_TOAST_TEST_SCHEDULE_ROOT",
+            "FYST_TO_TOAST_TEST_SCHEDULE_ROOT",
             "../legacy_repo/fyst-trajectories-sandbox-2026-10/"
             "examples/fyst_to_toast/output",
         )
@@ -60,7 +60,7 @@ def test_legacy_site_contract(case):
     if not schedule.is_file():
         pytest.skip(
             f"Legacy schedule absent: {schedule}; "
-            "set FYST_TOAST_TEST_SCHEDULE_ROOT to supply it"
+            "set FYST_TO_TOAST_TEST_SCHEDULE_ROOT to supply it"
         )
     read_site_metadata = runpy.run_path(str(REPO / "scripts/save_trajectory_h5.py"))[
         "read_site_metadata"

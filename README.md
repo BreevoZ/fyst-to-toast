@@ -1,4 +1,4 @@
-# fyst_toast
+# fyst-to-toast
 
 连接 FYST trajectory 与 TOAST Observation 的独立研究 package。
 目标是让 FYST 决定望远镜怎样运动，让 TOAST 使用该轨迹进行后续模拟。
@@ -11,8 +11,8 @@ writer 已能保存原生 TOAST Observation HDF5，但它独立于 `SimFYST`。
 ## 目录与阅读顺序
 
 ```text
-fyst_toast/
-├── src/fyst_toast/
+fyst-to-toast/
+├── src/fyst_to_toast/
 │   ├── __init__.py                 # 版本；不会主动 import TOAST / MPI
 │   ├── generate.py
 │   ├── trajectory_h5.py           # trajectory H5 writer / loader
@@ -79,7 +79,7 @@ python examples/01_ces_baseline.py
 当前 notebook 接口仍与 `SimGround` 相同：
 
 ```python
-from fyst_toast.sim_fyst import SimFYST
+from fyst_to_toast.sim_fyst import SimFYST
 
 sim = SimFYST(telescope=telescope, schedule=schedule, weather=None)
 sim.apply(data)  # 新建的空 TOAST Data；需要先设置好运行环境

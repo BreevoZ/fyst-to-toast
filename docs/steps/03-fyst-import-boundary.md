@@ -4,7 +4,7 @@
 
 ## 为什么要改、目的是什么
 
-用户只控制 `fyst_toast`。FYST 内部 API 会随版本变化：例如 v0.10 的 changelog
+用户只控制 `fyst-to-toast`。FYST 内部 API 会随版本变化：例如 v0.10 的 changelog
 记录移除了 `overhead.compute_nasmyth_rotation`，改用
 `Coordinates.get_field_rotation_from_altaz`。这是源码记录，不是本步运行的测试。
 已经生成的文件不应因为 trajectory generator 的内部 API 变化而无法处理。
@@ -19,9 +19,9 @@ SimFYST** 依赖文件约定。可选 contract test 仍 import FYST，用来检�
 
 | 文件与行号 | 改动 |
 |---|---|
-| `src/fyst_toast/fyst_flags.py:1` | 新增四个 plain-int enum：UNCLASSIFIED=0、SCIENCE=1、TURNAROUND=2、RETUNE=3；docstring 记录源文件、80–83 行及完整 `f095c51` commit |
+| `src/fyst_to_toast/fyst_flags.py:1` | 新增四个 plain-int enum：UNCLASSIFIED=0、SCIENCE=1、TURNAROUND=2、RETUNE=3；docstring 记录源文件、80–83 行及完整 `f095c51` commit |
 | `scripts/save_trajectory_h5.py:18,100,158` | 小 helper 用 Astropy `Table.read(..., format="ascii.ecsv").meta` 读 site；使用本地 flags，再按原单位构造 GroundSite |
-| `tools/check_writer_roundtrip.py:57` | flags 改从 `fyst_toast.fyst_flags` 导入 |
+| `tools/check_writer_roundtrip.py:57` | flags 改从 `fyst_to_toast.fyst_flags` 导入 |
 | `tests/test_fyst_contract.py:19,47,56` | `importorskip`、四项 enum 对照、CES/Daisy 两项 site 精确对照 |
 | `pyproject.toml:21` | `writer` extra 改名 `fyst`，保留 `>=0.10,<0.11` pin 和 UTC patch 注释；仅供未来 generation 和 contract test |
 | `README.md:37,57`、`docs/validation.md:139` | 最小依赖名称/用途更新；历史 wheel 检查仍标明当时名称 |
@@ -51,7 +51,7 @@ Site 不能未经测量就替换。源码 `overhead/io.py::_site_from_meta` 在�
 
 测试默认从 repo 位置解析
 `../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/{ces,daisy}/schedule.ecsv`。
-`FYST_TOAST_TEST_SCHEDULE_ROOT` 可覆盖包含 `ces/`、`daisy/` 的目录；相对值也相对
+`FYST_TO_TOAST_TEST_SCHEDULE_ROOT` 可覆盖包含 `ces/`、`daisy/` 的目录；相对值也相对
 repo，绝对值直接使用。缺文件时逐 case skip，原因给出缺失路径和该环境变量。
 
 ## 怎么验证的
@@ -69,7 +69,7 @@ Import blocker 位于本次 output 的 `blocker/fyst_trajectories/__init__.py`�
 |---|---|
 | blocker 下 writer + roundtrip checker，CES / Daisy | 3 / 4 blocks、5,921 / 9,399 samples；17 个 shared arrays 的存储 hash 和 12 个输入数组对照通过 |
 | blocker 下 `pytest tests/ -ra` | **43 passed, 1 skipped**；skip 是整个可选 contract 模块，原因明确 |
-| blocker 下单独 import `fyst_toast.fyst_flags` | 通过，未加载 FYST 或 TOAST |
+| blocker 下单独 import `fyst_to_toast.fyst_flags` | 通过，未加载 FYST 或 TOAST |
 | 无 blocker，`pytest tests/ -ra` | **49 passed**，含全部 6 项 contract checks |
 | 从其他 cwd 用相对 env override 指向缺失 schedule 目录 | **4 passed, 2 skipped**，两份缺失路径都正确相对 repo 解析 |
 | 无 blocker，`examples/01_ces_baseline.py` | 600 samples、8 个 shared arrays、13 组 intervals、detdata 完全一致；报告与原 baseline 字节相同 |

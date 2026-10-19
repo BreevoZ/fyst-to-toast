@@ -1,4 +1,4 @@
-# fyst_toast 开发约定
+# fyst-to-toast 开发约定
 
 这个独立 package 连接 FYST trajectory 与 TOAST Observation。默认用中文讨论，
 保留英文 API 和科学术语。先读 `README.md`、`docs/architecture.md`、

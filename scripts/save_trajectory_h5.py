@@ -79,7 +79,7 @@ def main():
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     for key in ("MPLCONFIGDIR", "XDG_CACHE_HOME", "NUMBA_CACHE_DIR"):
-        cache = Path(gettempdir()) / "fyst-toast" / key.lower()
+        cache = Path(gettempdir()) / "fyst-to-toast" / key.lower()
         cache.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault(key, str(cache))
 
@@ -89,7 +89,7 @@ def main():
     from astropy.table import QTable
     from astropy.utils import iers
 
-    from fyst_toast.trajectory_h5 import write_trajectory_blocks
+    from fyst_to_toast.trajectory_h5 import write_trajectory_blocks
 
     iers.conf.auto_download = False
     iers.conf.iers_degraded_accuracy = "error"

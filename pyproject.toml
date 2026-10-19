@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fyst-toast"
+name = "fyst-to-toast"
 version = "0.1.0.dev0"
 description = "Experimental FYST-to-TOAST adapter: CES baseline and trajectory HDF5 export"
 readme = "README.md"
@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Used by fyst_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
+# Used by fyst_to_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
 # Also requires the current UTC-offset patch in docs/patches; pip cannot express it.
 fyst = ["fyst-trajectories>=0.10,<0.11"]
 

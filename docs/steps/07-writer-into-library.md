@@ -14,10 +14,10 @@ key，修改格式时就能在同一处看到写入端和读取端的约定。
 
 | 入口 | 职责 |
 |---|---|
-| `src/fyst_toast/trajectory_h5.py:24`，`_TRAJECTORY_FIELDS` | 唯一定义 12 个 trajectory 字段名；writer 按原顺序写，loader 按同一清单读。第 40–41 行定义两个共享 metadata key |
-| `src/fyst_toast/trajectory_h5.py:209`，`write_trajectory_blocks()` | 接收内存 `QTable`（含 `meta['blocks']`、case、start_utc）、站点 name/deg/m、source hash、输出目录和 roll；创建原示意 Observations，调用原 `SaveHDF5`，返回有序 H5 文件名；`finally` 清理 `Data` |
-| `src/fyst_toast/trajectory_h5.py:64`，`_load_trajectory_block()` | 从旧 `trajectory_input.py` 搬来，保留函数名、返回结构和校验行为 |
-| `src/fyst_toast/trajectory_h5.py:158,178`，`_validate_clock()` / `_check_sample_rate()` | 保留时钟与采样率检查，不重采样 |
+| `src/fyst_to_toast/trajectory_h5.py:24`，`_TRAJECTORY_FIELDS` | 唯一定义 12 个 trajectory 字段名；writer 按原顺序写，loader 按同一清单读。第 40–41 行定义两个共享 metadata key |
+| `src/fyst_to_toast/trajectory_h5.py:209`，`write_trajectory_blocks()` | 接收内存 `QTable`（含 `meta['blocks']`、case、start_utc）、站点 name/deg/m、source hash、输出目录和 roll；创建原示意 Observations，调用原 `SaveHDF5`，返回有序 H5 文件名；`finally` 清理 `Data` |
+| `src/fyst_to_toast/trajectory_h5.py:64`，`_load_trajectory_block()` | 从旧 `trajectory_input.py` 搬来，保留函数名、返回结构和校验行为 |
+| `src/fyst_to_toast/trajectory_h5.py:158,178`，`_validate_clock()` / `_check_sample_rate()` | 保留时钟与采样率检查，不重采样 |
 | `scripts/save_trajectory_h5.py:17,31,63`，`read_site_metadata()` / `parse_args()` / `main()` | 从旧 example 搬来；保留参数及默认值、imports 前环境设置、IERS、ECSV 读取、hash / overwrite / 输入安全检查，以及两个 JSON 文件的写入 |
 | `tests/test_trajectory_h5.py:166`，`test_committed_write_load_roundtrip()` | 用已提交 CES / Daisy fixtures 重建输入，写到 `tmp_path` 再读回；逐字节核对 12 fields，并独立验证全部 17 个 shared arrays 的 hash manifest |
 
@@ -78,7 +78,7 @@ legacy 输入来自归档 `examples/fyst_to_toast/output/`；generated 输入来
 - 正常环境 `pytest tests/`：**51 passed**。
 - `PYTHONPATH` 放入抛 `ImportError` 的 FYST shadow package：writer 成功，3 个 CES H5 和
   两个 JSON 仍 byte-identical；pytest **45 passed, 1 skipped**，仅 FYST contract 模块跳过。
-- 从 repo 外导入 `fyst_toast` 和 `trajectory_h5`，均未加载 TOAST / FYST。
+- 从 repo 外导入 `fyst_to_toast` 和 `trajectory_h5`，均未加载 TOAST / FYST。
 - 用 `git archive HEAD` 加本步改动构成独立源码快照，无本地 output、无 W2 文件，确认导入
   来自快照；FYST 屏蔽时 **37 passed, 9 skipped**。两个新增 round-trip 都执行；跳过的是
   8 个已有可选 output 用例和 1 个 contract 模块。未重新安装依赖，也未冒称全新环境安装测试。
