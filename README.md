@@ -3,10 +3,11 @@
 将 FYST trajectory 转为 TOAST Observation 的独立研究 package：FYST 决定运动，
 TOAST 使用逐样本轨迹。安装名称为 `fyst-to-toast`，import 名称为 `fyst_to_toast`。
 
-**B2.2 已实现：`SimFYST` 可从一个 native trajectory H5 block 创建使用 caller Telescope
-的 Observation，保留原始时间 / 轨迹并计算 geometry。** CES / Daisy 均可输入；未提供
-`trajectory_file` 时仍走原 CES baseline。trajectory 模式尚未派生 shared flags / 扫描
-intervals（B2.3）或方向区间（B3），也未验收真实仪器或 sky / noise simulation。
+**B2.3 已实现：`SimFYST` 从一个 native trajectory H5 block 创建使用 caller Telescope
+的 Observation，保留原始轨迹、计算 geometry，并从 FYST enum 派生 shared flags 和
+scanning / turnaround / fyst_invalid intervals。** CES / Daisy 均可输入；未提供
+`trajectory_file` 时仍走原 CES baseline。solar intervals、方向区间（B3）、真实仪器
+及 sky / noise simulation 留待后续。
 
 ## 安装与运行环境
 
@@ -94,8 +95,11 @@ python -m pytest tests -q
 示例显式建立 source site 坐标上的 caller Telescope（两个 boresight detectors、标称
 10 Hz），打印字段 dtype / shape / 契约单位、metadata 与 rate check，再通过原生
 `SaveHDF5` 保存；输出目录存在时必须传 `--overwrite` 才能重跑。
-输出默认含 16 个 shared arrays（12 个原始输入 + 4 个派生 geometry）与清零的 detector
-signal / flags；文件里的五个 demo detectors 不用作运行仪器。
+输出默认含 17 个 shared arrays（12 个原始输入 + 4 个派生 geometry + uint8 shared flags）
+与清零的 detector signal / flags；文件里的五个 demo detectors 不用作运行仪器。
+FYST science → 0、turnaround → turnaround_mask（默认 4）、unclassified / retune → invalid
+（默认 1）。三个 motion intervals 从原 enum 的整数 `[first,last)` spans 创建；示例打印
+实际映射、各类样本数和区间，不使用存在端点 bug 的 IntervalList 集合运算。
 
 library 用法为 `SimFYST(telescope=caller_telescope, trajectory_file=str(path)).apply(data)`，
 要求空 `Data`、串行、caller site 与 source site 的 Cartesian 距离 ≤1 mm；caller sample

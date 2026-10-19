@@ -65,6 +65,12 @@ from toast.ops.sim_ground_utils import (
 )
 from toast.ops.sim_hwp import simulate_hwp_response
 
+from .fyst_flags import (
+    SCAN_FLAG_RETUNE,
+    SCAN_FLAG_SCIENCE,
+    SCAN_FLAG_TURNAROUND,
+    SCAN_FLAG_UNCLASSIFIED,
+)
 from .trajectory_h5 import (
     _TRAJECTORY_FIELDS,
     _TRAJECTORY_INFO_KEY,
@@ -73,12 +79,20 @@ from .trajectory_h5 import (
 )
 
 
+def _mask_to_sample_spans(mask):
+    """Return half-open integer spans for the True runs of a 1-D boolean mask."""
+    edges = np.diff(np.concatenate(([False], mask, [False])).astype(np.int8))
+    return list(
+        zip(np.flatnonzero(edges == 1).tolist(), np.flatnonzero(edges == -1).tolist())
+    )
+
+
 @trait_docs
 class SimFYST(Operator):
     """Simulate a generic ground-based telescope scanning.
 
     With trajectory_file, use one native block and the caller's Telescope to build
-    time / geometry only. Shared flags and scan intervals are not yet derived.
+    time / geometry and motion flags / intervals from the original FYST enum.
     Without trajectory_file, the original schedule-based CES behavior follows.
 
     This simulates ground-based pointing in constant elevation scans for a telescope
@@ -306,6 +320,10 @@ class SimFYST(Operator):
 
     turnaround_interval = Unicode(
         defaults.turnaround_interval, help="Interval name for turnarounds"
+    )
+
+    fyst_invalid_interval = Unicode(
+        "fyst_invalid", help="Trajectory interval name for unclassified / retune samples"
     )
 
     throw_leftright_interval = Unicode(
@@ -1361,9 +1379,30 @@ class SimFYST(Operator):
                 )
         if self.det_data is not None and self.det_data == self.det_flags:
             raise ValueError("det_data and det_flags must have distinct names")
+        if (
+            not self.shared_flags
+            or self.shared_flags in _TRAJECTORY_FIELDS
+            or self.shared_flags in names.values()
+        ):
+            raise ValueError(
+                "trajectory shared_flags must be a non-empty, distinct output name"
+            )
+        intervals = (
+            self.scanning_interval,
+            self.turnaround_interval,
+            self.fyst_invalid_interval,
+        )
+        if len(set(intervals)) != 3 or any(
+            not key or key == "ALL_OBSERVATION_SAMPLES" for key in intervals
+        ):
+            raise ValueError(
+                "trajectory interval names must be non-empty, distinct and not reserved"
+            )
+        if not 0 <= self.turnaround_mask <= np.iinfo(np.uint8).max:
+            raise ValueError("trajectory turnaround_mask must fit uint8 (0..255)")
 
     def _exec_trajectory(self, data, detectors=None):
-        """Build time / geometry from one block, using only the caller's instrument."""
+        """Build geometry and motion classification from one block for the caller."""
         self._validate_trajectory_config(data, detectors)
         source = Path(self.trajectory_file).expanduser().resolve()
         block = _load_trajectory_block(source)
@@ -1419,7 +1458,7 @@ class SimFYST(Operator):
             end=datetime.fromtimestamp(times[-1], tz=timezone.utc),
         )
         info = {
-            "contract_version": "B2.2",
+            "contract_version": "B2.3",
             "source_file": source.name,
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "samples": len(times),
@@ -1433,7 +1472,13 @@ class SimFYST(Operator):
             "caller_telescope": telescope.name,
             "caller_site": site.name,
             "coordinate_backend": backend,
-            "flags/intervals": "not yet derived (B2.3)",
+            "flags/intervals": "motion derived (B2.3); solar/directions not yet derived",
+            "flag_mapping": {
+                SCAN_FLAG_SCIENCE: 0,
+                SCAN_FLAG_TURNAROUND: int(self.turnaround_mask),
+                SCAN_FLAG_UNCLASSIFIED: int(defaults.shared_mask_invalid),
+                SCAN_FLAG_RETUNE: int(defaults.shared_mask_invalid),
+            },
         }
         ob = Observation(
             data.comm,
@@ -1464,6 +1509,32 @@ class SimFYST(Operator):
             for key, array in arrays.items():
                 ob.shared.create_column(key, shape=array.shape, dtype=array.dtype)
                 ob.shared[key].set(array, offset=(0,) * array.ndim, fromrank=0)
+
+            raw = block.arrays["fyst_scan_flag"]
+            classes = {
+                "science": (raw == SCAN_FLAG_SCIENCE, self.scanning_interval),
+                "turnaround": (raw == SCAN_FLAG_TURNAROUND, self.turnaround_interval),
+                "invalid": (
+                    np.isin(raw, (SCAN_FLAG_UNCLASSIFIED, SCAN_FLAG_RETUNE)),
+                    self.fyst_invalid_interval,
+                ),
+            }
+            flags = np.zeros(len(times), dtype=np.uint8)
+            flags[classes["turnaround"][0]] = self.turnaround_mask
+            flags[classes["invalid"][0]] = defaults.shared_mask_invalid
+            ob.shared.create_column(
+                self.shared_flags, shape=flags.shape, dtype=flags.dtype
+            )
+            ob.shared[self.shared_flags].set(flags, offset=(0,), fromrank=0)
+            # Integer spans avoid the TOAST 3.0.5 interval set-operation endpoint bugs.
+            for mask, key in classes.values():
+                ob.intervals[key] = IntervalList(
+                    times, samplespans=_mask_to_sample_spans(mask)
+                )
+            info["class_counts"] = {
+                key: int(np.count_nonzero(mask)) for key, (mask, _) in classes.items()
+            }
+
             if self.det_data is not None:
                 ob.detdata.ensure(
                     self.det_data, dtype=np.float64, create_units=self.det_data_units
@@ -1495,13 +1566,18 @@ class SimFYST(Operator):
                         [
                             *_TRAJECTORY_FIELDS,
                             *self._trajectory_shared_names().values(),
+                            self.shared_flags,
                         ]
                     )
                 ),
                 "detdata": [
                     key for key in (self.det_data, self.det_flags) if key is not None
                 ],
-                "intervals": [],
+                "intervals": [
+                    self.scanning_interval,
+                    self.turnaround_interval,
+                    self.fyst_invalid_interval,
+                ],
             }
         prov = {
             "shared": [

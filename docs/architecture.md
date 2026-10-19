@@ -13,7 +13,7 @@ FYST read_timeline → schedule_to_trajectories
 scripts/save_trajectory_h5.py → trajectory_h5.write_trajectory_blocks
     ↓ TOAST SaveHDF5：每 native block 一个 Observation H5 + files.json
 trajectory_h5._load_trajectory_block → 校验并复制原始轨迹
-    ↓ SimFYST(trajectory_file=..., telescope=caller)：单 block time / geometry
+    ↓ SimFYST(trajectory_file=..., telescope=caller)：单 block geometry / motion classification
 TOAST Data.obs / Observation → 后续模拟 operators
 ```
 
@@ -99,7 +99,7 @@ CLI 的 `files.json` 列出本轮 H5，读取时用清单避免混入旧文件�
   `abs(nominal-actual)/actual <= rtol`，返回两种 rate、relative error 和 rtol。
   允许微小频差不表示允许 gaps / jitter；不规则采样策略尚未实现。
 
-## SimFYST 单 block time / geometry（B2.2）
+## SimFYST 单 block geometry / motion classification（B2.2–B2.3）
 
 `trajectory_file=None` 保持原 schedule/CES 路径。提供文件时，`_exec()` 在任何 schedule
 检查之前进入独立方法；既不读取 GroundSchedule，也不调用 CES / elnod generator。
@@ -124,8 +124,8 @@ fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS �
 - `_TRAJECTORY_FIELDS` 的全部 12 列保留原名 / dtype / shape / bytes，包括 times、Az、El，
   不 wrap、不 round、不转换原始 degree / radian 副本。标准 output name traits 可设别名，
   原始列仍保留；拒绝同名碰撞。默认新增两个 boresight quaternions 和 position / velocity，
-  合计 16 个 shared columns。detdata 由 caller detectors 决定：默认 float64 signal（K）和
-  uint8 flags，native allocator 全部清零；对应 name 为 None 时跳过。
+  加上 B2.3 的 shared flags，合计 17 个 shared columns。detdata 由 caller detectors 决定：
+  默认 float64 signal（K）和 uint8 flags，native allocator 全部清零；对应 name 为 None 时跳过。
 - boresight 使用 `qa.from_lonlat_angles(-az, el, 0)`；非零 roll **右乘**本地 z rotation，
   与 SimGround 相同。`trajectory_boresight_angle=None` 使用 finite source `roll_deg`，
   显式 angular Quantity 覆盖运行 roll；不改 source JSON，也不推断真实 Nasmyth 姿态。
@@ -136,13 +136,15 @@ fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS �
 
 metadata 分开记录来源和当前计算：`trajectory_info` 为来源 JSON 原文；
 `source_shared_array_sha256` 为来源 manifest 的 JSON，不冒充当前输出 hashes；
-`simfyst_info` 是 JSON，记录 B2.2 contract、source basename / 整文件 SHA-256、N / 首末
+`simfyst_info` 是 JSON，记录 B2.3 contract、source basename / 整文件 SHA-256、N / 首末
 timestamp、rate check / clock residual、roll 与来源、caller telescope/site 名称、coordinate
-backend 选项及 `flags/intervals: not yet derived (B2.3)`。Shared arrays 本身无单位属性；
-示例打印契约单位，detdata 则带 native units。
+backend 选项；`flags/intervals` 标明 motion 已派生、solar / directions 尚未派生，
+`flag_mapping` 记录 enum → 实际整数 mask，`class_counts` 记录 science / turnaround / invalid
+样本数。Shared arrays 本身无单位属性；示例打印契约单位，detdata 则带 native units。
 
-trajectory 分支不创建 shared flags、不派生扫描或 solar intervals，也不运行 AzimuthRanges。
-`_provides()` 只声明实际提供的 shared / detdata，intervals 为空；Observation 构造器自带的
+trajectory 分支创建 shared flags 及三个基础 motion intervals；不派生 solar / direction
+intervals，也不运行 AzimuthRanges。`_provides()` 声明 shared flags 和三个基础 intervals，
+保留实际提供的其他 shared / detdata；Observation 构造器自带的
 `ALL_OBSERVATION_SAMPLES` 仅描述全样本结构，不是扫描分类。见
 [教学示例](../examples/02_simfyst_trajectory.py) 与 [验收测试](../tests/test_sim_fyst_trajectory.py)。
 
@@ -154,13 +156,22 @@ writer 保留原 enum，同时将 science 映射为 TOAST `0`、turnaround 映�
 `shared_mask_invalid`（`1`）。TOAST flags 是可组合 bitmask，应按位判断，不能用
 `flags == 4` 代替位测试。`0/3` 的最终科学处理尚未决定；合成测试通过不代表真实状态验收。
 
+B2.3 SimFYST 直接读取原 `fyst_scan_flag`，同样映射 science → 0、turnaround → caller
+配置的 `turnaround_mask`、unclassified / retune → `defaults.shared_mask_invalid`，不复用
+writer 保存的 flags。输出使用 `shared_flags` trait 指定的名称和 uint8 dtype；该名称必须
+非空且不与其他 shared columns 冲突，turnaround_mask 必须在 uint8 范围内。
+`scanning_interval` 对应 raw science、`turnaround_interval` 对应 raw turnaround，新增
+`fyst_invalid_interval`（默认 `fyst_invalid`）对应 raw unclassified / retune；区间名称必须
+非空、互异，且不能占用 `ALL_OBSERVATION_SAMPLES`。三类互斥并覆盖所有样本。
+shared flags 用于下游按 bitmask 排除样本，intervals 用于 `obs.view[name]` 分段访问。
+
 sample spans 使用半开 **`[first,last)`**，选取 `first` 到 `last-1`，长度为 `last-first`。
 2026-10-18 已复现安装版 TOAST 3.0.5 `IntervalList` 端点 bug：
 `samplespans=[(1,5)] | 空集` 得到 `[(1,6)]`；`~[(0,2),(3,6)]` 在六样本轴上得到空集，
-预期却是 `[(2,3)]`。不要依赖 `|` / `~` 合并或反转这些区间；未来从 flags 直接计算
-整数 spans，再建立 intervals。原生 SimGround 的区间合并也可能受影响，升级版本需重核。
-本步复现日志见 本地笔记 `docs/steps/09-repo-docs-and-licenses.md`。writer 尚未保存扫描 interval
-lists，loader 也未重建；原生 SimGround 从 intervals 写 flags，未来轨迹输入方向相反。
+预期却是 `[(2,3)]`。SimFYST 的 `_mask_to_sample_spans` 从原 enum 的布尔 masks 找连续
+True runs，直接传给 `IntervalList(times, samplespans=...)`，不做时间端点 round trip，
+不使用 `|`、`~` 或 `IntervalList(intervals=...)`。原生 SimGround 的区间合并也可能受影响，
+升级版本需重核。writer / loader 不派生这些 motion intervals；由 SimFYST trajectory 分支完成。
 
 writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAST longitude
 `-Az` 构造 boresight，`--roll-deg` 默认 0°，再调用 `azel_to_radec(..., use_ephem=True)`
@@ -168,7 +179,7 @@ writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAS
 真实 FYST focalplane / Nasmyth roll 尚未验收。`detdata=[]`，没有 detector signal、
 sky / atmosphere / noise simulation，也没有用独立 astrometry reference 验证 RA/Dec。
 
-下一步是 **B2.3：trajectory shared flags / intervals**，之后是 **B3：方向区间**；
-多 block、Pong、MPI 和真实 focalplane / roll 另行推进。
+后续是 **solar intervals** 与 **B3：方向区间**；多 block、Pong、MPI 和真实
+focalplane / roll 另行推进。
 Daisy 高 El 的上游 acceleration warnings 仍未解决，历史现象及限制见 W2；
 CES / Daisy 串行 IO 通过不代表所有 patterns 或运动约束已经验收。

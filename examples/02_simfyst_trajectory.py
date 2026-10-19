@@ -41,6 +41,8 @@ def field_unit(key):
         return "km"
     if key == "velocity":
         return "km/s"
+    if key == "flags":
+        return "1 (bitmask)"
     return "1 (quaternion)" if key.startswith("boresight_") else "1 (enum/index)"
 
 
@@ -104,6 +106,12 @@ def main():
             info = json.loads(obs["simfyst_info"])
             print(f"Rate check: {json.dumps(info['rate_check'], sort_keys=True)}")
             print(f"flags/intervals: {info['flags/intervals']}")
+            print(f"Flag mapping (FYST enum -> TOAST mask): {info['flag_mapping']}")
+            print(f"Class samples: {info['class_counts']}")
+            for key in obs.intervals:
+                if key != "ALL_OBSERVATION_SAMPLES":
+                    spans = [(int(iv.first), int(iv.last)) for iv in obs.intervals[key]]
+                    print(f"Intervals {key} [first,last): {spans}")
             # 禁用 volume index，重跑只替换这一 Observation H5，不追加重复索引。
             SaveHDF5(volume=str(folder), volume_index=None, force_serial=True).apply(
                 data

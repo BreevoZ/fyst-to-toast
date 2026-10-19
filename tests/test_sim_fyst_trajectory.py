@@ -1,4 +1,4 @@
-"""B2.2: independent native-geometry / byte checks on committed fixtures only."""
+"""B2.2/B2.3: native geometry, bytes and motion classification on fixture inputs."""
 
 import os
 
@@ -7,6 +7,7 @@ for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
 
 import hashlib
 import json
+import shutil
 import socket
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -26,11 +27,18 @@ from toast.coordinates import azel_to_radec
 from toast.instrument import Focalplane, GroundSite, Telescope
 from toast.instrument_sim import fake_boresight_focalplane
 from toast.mpi import Comm
+from toast.observation import default_values as defaults
 from toast.schedule import GroundSchedule
 from toast.utils import name_UID
 
 from fyst_to_toast import sim_fyst
-from fyst_to_toast.sim_fyst import SimFYST
+from fyst_to_toast.fyst_flags import (
+    SCAN_FLAG_RETUNE,
+    SCAN_FLAG_SCIENCE,
+    SCAN_FLAG_TURNAROUND,
+    SCAN_FLAG_UNCLASSIFIED,
+)
+from fyst_to_toast.sim_fyst import SimFYST, _mask_to_sample_spans
 from fyst_to_toast.trajectory_h5 import _TRAJECTORY_FIELDS, _load_trajectory_block
 
 iers.conf.auto_download = False
@@ -176,7 +184,7 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
     )
     assert "shared_array_sha256" not in obs
     info = json.loads(obs["simfyst_info"])
-    assert info["contract_version"] == "B2.2"
+    assert info["contract_version"] == "B2.3"
     assert info["source_file"] == source.path.name
     assert info["source_sha256"] == hashlib.sha256(source.path.read_bytes()).hexdigest()
     assert info["samples"] == len(t)
@@ -202,13 +210,14 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
         "so3g_compat_mode": False,
     }
     assert info["max_phase_residual_s"] <= info["time_tolerance_s"]
-    assert info["flags/intervals"] == "not yet derived (B2.3)"
-    assert op.shared_flags not in obs.shared
-    # TOAST creates this structural interval in every Observation constructor.
-    assert set(obs.intervals) == {"ALL_OBSERVATION_SAMPLES"}
+    assert_motion_classification(obs, op, source.arrays["fyst_scan_flag"])
     assert set(op.provides()["shared"]) == set(obs.shared)
     assert set(op.provides()["detdata"]) == set(obs.detdata)
-    assert op.provides()["intervals"] == []
+    assert set(op.provides()["intervals"]) == {
+        op.scanning_interval,
+        op.turnaround_interval,
+        op.fyst_invalid_interval,
+    }
 
 
 UNSUPPORTED = [
@@ -245,6 +254,14 @@ UNSUPPORTED = [
     ("det_data", "flags"),
     ("trajectory_boresight_angle", np.nan * u.deg),
     ("trajectory_boresight_angle", np.inf * u.deg),
+    ("shared_flags", None),
+    ("shared_flags", "times"),
+    ("shared_flags", "boresight_azel"),
+    ("scanning_interval", ""),
+    ("turnaround_interval", "scanning"),
+    ("fyst_invalid_interval", "ALL_OBSERVATION_SAMPLES"),
+    ("turnaround_mask", -1),
+    ("turnaround_mask", 256),
 ]
 
 
@@ -258,6 +275,9 @@ def test_unsupported_settings(source, data, key, value):
         "velocity": "distinct",
         "det_data": "distinct",
         "trajectory_boresight_angle": "finite",
+        "scanning_interval": "interval names",
+        "turnaround_interval": "interval names",
+        "fyst_invalid_interval": "interval names",
     }.get(key, key)
     with pytest.raises(ValueError, match=match):
         SimFYST(
@@ -454,3 +474,161 @@ def test_coordinate_backend_options(source, data, monkeypatch):
     )
     quaternion_equal(obs.shared[op.boresight_radec].data, expected)
     assert json.loads(obs["simfyst_info"])["coordinate_backend"] == expected_options
+
+
+def assert_motion_classification(obs, op, raw):
+    """Independent per-sample oracle; validate intervals and native views separately."""
+    expected_flags = np.zeros(len(raw), dtype=np.uint8)
+    expected_flags[raw == SCAN_FLAG_TURNAROUND] = op.turnaround_mask
+    expected_flags[np.isin(raw, [SCAN_FLAG_UNCLASSIFIED, SCAN_FLAG_RETUNE])] = (
+        defaults.shared_mask_invalid
+    )
+    flags = obs.shared[op.shared_flags].data
+    assert flags.dtype == np.uint8
+    np.testing.assert_array_equal(flags, expected_flags)
+    masks = {
+        "science": (op.scanning_interval, raw == SCAN_FLAG_SCIENCE),
+        "turnaround": (op.turnaround_interval, raw == SCAN_FLAG_TURNAROUND),
+        "invalid": (
+            op.fyst_invalid_interval,
+            np.isin(raw, [SCAN_FLAG_UNCLASSIFIED, SCAN_FLAG_RETUNE]),
+        ),
+    }
+    coverage = np.zeros(len(raw), dtype=int)
+    for key, expected in masks.values():
+        reconstructed = np.zeros(len(raw), dtype=bool)
+        for interval in obs.intervals[key]:
+            assert 0 <= interval.first < interval.last <= len(raw)
+            reconstructed[interval.first : interval.last] = True
+        np.testing.assert_array_equal(reconstructed, expected)
+        coverage += reconstructed
+        view_mask = np.zeros(len(raw), dtype=bool)
+        for span in obs.view[key].slices:
+            view_mask[span] = True
+        np.testing.assert_array_equal(view_mask, expected)
+        viewed_times = obs.view[key].shared[op.times]
+        np.testing.assert_array_equal(
+            np.concatenate(viewed_times) if viewed_times else np.array([]),
+            obs.shared[op.times].data[expected],
+        )
+    np.testing.assert_array_equal(coverage, np.ones(len(raw), dtype=int))
+    assert set(obs.intervals) == {
+        "ALL_OBSERVATION_SAMPLES",
+        *(key for key, _ in masks.values()),
+    }
+    info = json.loads(obs["simfyst_info"])
+    assert (
+        info["flags/intervals"]
+        == "motion derived (B2.3); solar/directions not yet derived"
+    )
+    assert info["flag_mapping"] == {
+        str(SCAN_FLAG_SCIENCE): 0,
+        str(SCAN_FLAG_TURNAROUND): op.turnaround_mask,
+        str(SCAN_FLAG_UNCLASSIFIED): defaults.shared_mask_invalid,
+        str(SCAN_FLAG_RETUNE): defaults.shared_mask_invalid,
+    }
+    assert info["class_counts"] == {
+        key: int(np.count_nonzero(mask)) for key, (_, mask) in masks.items()
+    }
+
+
+@pytest.mark.parametrize(
+    "mask,spans",
+    [
+        ([True] * 6, [(0, 6)]),
+        ([False] * 6, []),
+        ([True, False, False], [(0, 1)]),
+        ([False, False, True], [(2, 3)]),
+        ([False, True, False], [(1, 2)]),
+        ([True, True, False, True, True], [(0, 2), (3, 5)]),
+    ],
+)
+def test_mask_to_sample_spans(mask, spans):
+    assert _mask_to_sample_spans(np.array(mask, dtype=bool)) == spans
+
+
+def test_adjacent_class_runs():
+    raw = np.array(
+        [
+            SCAN_FLAG_SCIENCE,
+            SCAN_FLAG_SCIENCE,
+            SCAN_FLAG_TURNAROUND,
+            SCAN_FLAG_UNCLASSIFIED,
+            SCAN_FLAG_RETUNE,
+        ]
+    )
+    assert _mask_to_sample_spans(raw == SCAN_FLAG_SCIENCE) == [(0, 2)]
+    assert _mask_to_sample_spans(raw == SCAN_FLAG_TURNAROUND) == [(2, 3)]
+    assert _mask_to_sample_spans(
+        np.isin(raw, [SCAN_FLAG_UNCLASSIFIED, SCAN_FLAG_RETUNE])
+    ) == [(3, 5)]
+
+
+def test_fixture_motion_spans(source, data):
+    op = SimFYST(telescope=caller(source), trajectory_file=str(source.path))
+    op.apply(data)
+    obs = data.obs[0]
+    assert_motion_classification(obs, op, source.arrays["fyst_scan_flag"])
+    expected = {
+        "fyst_ces_000_001.h5": {
+            "scanning": [
+                (0, 477),
+                (497, 1175),
+                (1195, 1873),
+                (1893, 2571),
+                (2591, 2611),
+            ],
+            "turnaround": [(477, 497), (1175, 1195), (1873, 1893), (2571, 2591)],
+        },
+        "fyst_daisy_003_000.h5": {"scanning": [(5, 399)], "turnaround": [(0, 5)]},
+    }[source.path.name]
+    for key, spans in expected.items():
+        actual = [(int(iv.first), int(iv.last)) for iv in obs.intervals[key]]
+        assert actual == spans
+        print(f"{source.path.name} {key}: {actual}")
+    assert len(obs.intervals[op.fyst_invalid_interval]) == 0
+
+
+def test_synthetic_invalid_endpoints(source, data, tmp_path):
+    path = tmp_path / source.path.name
+    shutil.copyfile(source.path, path)
+    raw = source.arrays["fyst_scan_flag"].copy()
+    raw[0], raw[-1] = SCAN_FLAG_UNCLASSIFIED, SCAN_FLAG_RETUNE
+    with h5py.File(path, "r+") as saved:
+        saved["shared/fyst_scan_flag"][:] = raw
+        metadata = saved["metadata/other"].attrs
+        manifest = json.loads(metadata["shared_array_sha256"])
+        manifest["fyst_scan_flag"] = hashlib.sha256(raw.tobytes()).hexdigest()
+        metadata["shared_array_sha256"] = json.dumps(manifest)
+    op = SimFYST(telescope=caller(source), trajectory_file=str(path))
+    op.apply(data)
+    obs = data.obs[0]
+    assert_motion_classification(obs, op, raw)
+    assert [(iv.first, iv.last) for iv in obs.intervals[op.fyst_invalid_interval]] == [
+        (0, 1),
+        (len(raw) - 1, len(raw)),
+    ]
+    assert obs.shared[op.shared_flags].data[0] == defaults.shared_mask_invalid
+    assert obs.shared[op.shared_flags].data[-1] == defaults.shared_mask_invalid
+    assert obs.shared["fyst_scan_flag"].data.tobytes() == raw.tobytes()
+    assert json.loads(obs["simfyst_info"])["class_counts"]["invalid"] == 2
+
+
+def test_custom_motion_output_names_and_mask(source, data):
+    op = SimFYST(
+        telescope=caller(source),
+        trajectory_file=str(source.path),
+        shared_flags="motion_flags",
+        scanning_interval="science_samples",
+        turnaround_interval="turn_samples",
+        fyst_invalid_interval="invalid_samples",
+        turnaround_mask=64,
+    )
+    op.apply(data)
+    obs = data.obs[0]
+    assert_motion_classification(obs, op, source.arrays["fyst_scan_flag"])
+    assert "flags" not in obs.shared
+    assert set(op.provides()["shared"]) == set(obs.shared)
+    assert set(op.provides()["intervals"]) == set(obs.intervals) - {
+        "ALL_OBSERVATION_SAMPLES"
+    }
