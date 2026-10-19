@@ -1,16 +1,20 @@
 # 验证记录
 
-执行日期：**2026-10-18**。以下为本次实际执行结果；不以旧 example 的报告代替新脚本验证。
+执行日期：**2026-10-18**。保留原 writer 迁移验证；依赖更新后的执行结果另见下方 R2 小节。
 生成数据和完整本机报告位于被 Git 忽略的 `output/`，这里只保存可读结论与复现方法。
 
 ## 环境
 
-Python 3.12.14；TOAST 3.0.5；FYST trajectories 0.8.0；NumPy 2.5.2；SciPy 1.18.1；
+原迁移验证：Python 3.12.14；TOAST 3.0.5；FYST trajectories 0.8.0；NumPy 2.5.2；SciPy 1.18.1；
 Astropy 8.0.1；h5py 3.16.0；setuptools 84.0.0；Ruff 0.16.5。
 这是本机已有环境，没有为本次验证下载或更新依赖。全部数值验证串行关闭 MPI，
 `OMP_NUM_THREADS=1`、`OPENBLAS_NUM_THREADS=1`，IERS 自动下载关闭。
 
 ## FYST 本地兼容修改
+
+当前依赖为 FYST 0.10.0（`f095c51` + [当前补丁](patches/fyst-trajectories-utc-offset_f095c51.patch)），
+实际通过 env `fyst` 的静态 `.pth` 导入新 checkout；pip 0.8.0 metadata 已过时。
+新机器重建见 [补丁说明](patches/README.md)。以下保留 **0.8.0 历史记录**，用于 fixture 来源追溯。
 
 FYST 0.8.0 来自 base commit `2d0a3d395486fd4a43d83c8b38138e9b7bb6159b` 的本地
 working tree，并非未修改的 release。相关修改是 `src/fyst_trajectories/overhead/io.py`
@@ -19,21 +23,42 @@ working tree，并非未修改的 release。相关修改是 `src/fyst_trajectori
 直接 `Time(value, scale="utc")`，该解析方式在本次 Astropy 环境中会失败。
 
 已将这份既有文件 diff 原样保存在
-[fyst-timeline-utc.patch](patches/fyst-timeline-utc.patch)，没有改写 reader 或自动 patch
+[fyst-timeline-utc_2d0a3d3.patch](patches/fyst-timeline-utc_2d0a3d3.patch)，没有改写 reader 或自动 patch
 依赖。`UPSTREAM.json` 记录 base commit、实际文件 hash 和 patch hash。
 在临时目录用 base 文件执行 `git apply --check` / `git apply` 成功，应用后的文件与
 本机实际使用的 `io.py` 逐字节一致；原 FYST checkout 未改变。
 
-新机器应先检查目标 FYST 是否已经支持 UTC offsets。若需要复现这一已记录的 base，
-在那个 FYST checkout 内使用实际补丁路径：
+以下仅供复现历史 base `2d0a3d3`，不是当前依赖的安装步骤；应先检查目标是否已有修复，
+在对应的历史 FYST checkout 内使用实际补丁路径：
 
 ```bash
-git apply --check /path/to/fyst_toast/docs/patches/fyst-timeline-utc.patch
-git apply /path/to/fyst_toast/docs/patches/fyst-timeline-utc.patch
+git apply --check /path/to/fyst_toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
+git apply /path/to/fyst_toast/docs/patches/fyst-timeline-utc_2d0a3d3.patch
 ```
 
 已有修复的 working tree 不要重复应用。其他版本应先核对当前实现；补丁只验证过上述
 base。普通发行版、新环境和完整 FYST working-tree 的其他改动未由这份补丁覆盖。
+
+## R2：新依赖上的 writer 复跑
+
+实际在 `f095c51` + 当前 UTC 补丁上执行：本地临时 clone 应用补丁后，4 个涉及文件与
+新 checkout 逐字节相同；临时 clone 已删除。导入路径为 workspace 的
+`fyst-trajectories/src/fyst_trajectories/__init__.py`，`__version__=0.10.0`，
+`overhead/io.py` SHA-256 为 `32d9041d1af683579152f1ed7f7c4a86c92d110dc932c30cf4fbf356124458d3`。
+
+使用下方相同 ECSV hashes 和新 clone 中字节相同的 IERS 表，CES / Daisy writer 及
+`tools/check_writer_roundtrip.py` 均通过。与升级前 `output/{ces,daisy}/hdf5/` 比较：
+3 / 4 个 Observations，样本分别为 `850 / 2611 / 2460` 和 `3000 / 3000 / 3000 / 399`；
+名称、每个 Observation 的全部 17 个 shared arrays（dtype / shape / bytes）、
+`trajectory_info`、`shared_array_sha256`、focalplane 与 site 全部相同。递归比较的
+所有 H5 datasets / attributes 也相同；**7 个 H5 整文件 bytes / SHA-256 均相同，无差异**。
+两个 case 的 `files.json`、`writer_report.json` 也逐字节相同。
+
+`pytest tests/` 使用新输出运行，**43 passed，0 skipped**；CES baseline 的 600 samples、
+8 个 shared arrays、13 组 intervals、detdata 与 Observation / Session 对照通过。
+`git diff --check` 通过。此次没有重新生成 FYST schedule / trajectory，也没有重跑旧的
+CLI / wheel 构建检查。命令和限制见 [R2 学习笔记](steps/02-fyst-dependency-patch.md)，
+原始日志 / 完整对比报告在 `output/codex/R2_fyst_dependency/`。
 
 ## CES baseline
 
@@ -50,15 +75,17 @@ fields 和关键 Observation / Session 信息完全一致。代码 AST 对照也
 ## 迁移 writer 与原生读回
 
 在已有研究 workspace 中，从本 repo 根目录运行。将 `ces` 换为 `daisy` 可复现另一组：
+输入已从旧 `../fyst-trajectories/examples/...` 移至下列归档路径；命令使用独立 R2 输出目录，原输出保留。
 
 ```bash
 python examples/02_save_trajectory.py \
-  ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
-  --iers-file ../fyst-trajectories/tests/data/finals2000A.all
+  ../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
+  --iers-file ../fyst-trajectories/tests/data/finals2000A.all \
+  --output-dir output/codex/R2_fyst_dependency/ces/hdf5
 
 python tools/check_writer_roundtrip.py \
-  ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
-  output/ces/hdf5
+  ../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
+  output/codex/R2_fyst_dependency/ces/hdf5
 ```
 
 重复写入已有目录时需加 `--overwrite` 或选择新的 `--output-dir`。

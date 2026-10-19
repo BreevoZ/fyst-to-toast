@@ -24,6 +24,7 @@ writer 和 TOAST classes，不为了 demo 重造算法或人为改变 block 边�
 
 writer 来自旧 workspace example
 `fyst-trajectories/examples/fyst_to_toast/hdf5/03_save_trajectory.py`。
+该历史路径现位于 workspace 的 `legacy_repo/fyst-trajectories-sandbox-2026-10/` 下；输入 ECSV 同在其 `examples/fyst_to_toast/output/{ces,daisy}/`。
 迁移时保留原有数组适配及原生 `SaveHDF5`，解除旧 example 路径依赖。
 来源、复制时文件 hash 和 license 以 repo 的来源记录为准；该旧文件是本地
 working-tree example，不能仅凭 FYST repo 的 HEAD 声称它是上游已提交的实现。
@@ -57,11 +58,14 @@ writer 接口：
 列名相似的 ECSV。reader / writer 需要的字段、metadata 和来源检查见
 [架构说明](architecture.md) 与脚本的 `--help`。
 
-**依赖的本地修改也需要交接：**本次 FYST 0.8.0 working tree 含已有 `_iso_utc` /
-`_read_time` 修复，使 `read_timeline` 可解析输入中的 `+00:00` 时间。普通同版本安装
-不保证等价。现有 diff 已保存为 [兼容补丁](patches/fyst-timeline-utc.patch)，base commit、
-hash、已验证的应用条件见 [验证记录](validation.md#fyst-本地兼容修改)；本 repo 不自动
-修改依赖。不要在已有修复的 checkout 重复应用，也不要悄悄删掉时间的 UTC offset。
+**依赖的本地修改也需要交接：**当前 FYST 0.10.0（base `f095c51`）working tree 含
+UTC-offset / microsecond 修复，使 `read_timeline` 可解析输入中的 `+00:00` 时间。
+普通同版本安装不保证等价。当前 [兼容补丁](patches/fyst-trajectories-utc-offset_f095c51.patch)
+及历史 fixture 的 [0.8.0 补丁](patches/fyst-timeline-utc_2d0a3d3.patch) 均由本 repo 保存；
+base commit、hash、重建命令见 [补丁说明](patches/README.md)，实际 writer 对比见
+[R2 学习笔记](steps/02-fyst-dependency-patch.md)。env 通过静态 `.pth` 导入新 checkout，
+不要以残留的 pip 0.8.0 metadata 判断代码版本。本 repo 不自动修改依赖；不要在已有
+修复的 checkout 重复应用，也不要悄悄删掉时间的 UTC offset。
 
 串行 example 在 import 前关闭 MPI、限制数值线程；package 本身不改环境。
 本机曾出现只 import MPI 即 idle 200% CPU 的情况，这属于本机已观察到的问题，

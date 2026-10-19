@@ -60,11 +60,13 @@ trajectory generator → 旧本地 example 的 `fyst_trajectory.ecsv` 与 `sched
 base commit 为 `2d0a3d395486fd4a43d83c8b38138e9b7bb6159b`；不是未修改的 release，
 **本次没有用 v0.10 重新生成**。`_iso_utc` / `_read_time` 的本地补丁支持带 `+00:00`
 的时间文本。补丁和来源文件 hash 见 [UPSTREAM.json](../UPSTREAM.json) 与
-[保存的 UTC patch](../docs/patches/fyst-timeline-utc.patch)。writer 源自旧本地
+[历史 UTC patch](../docs/patches/fyst-timeline-utc_2d0a3d3.patch)。当前 0.10.0 依赖使用
+[另一份补丁](../docs/patches/README.md)，不改变这些 fixtures 的历史来源。writer 源自旧本地
 working-tree example，并非 FYST upstream 已提交文件；原有 license / authors 记录
 见 [NOTICE](../NOTICE)、[AUTHORS](../AUTHORS) 和 [LICENSES](../LICENSES)。
 
-验证记录中的 writer 命令如下（从本 repo 根目录执行；这是**历史命令，本次未运行**）：
+验证记录中的 writer 命令如下（从本 repo 根目录执行；这是 **R4 记录的历史命令，R4 未运行**）：
+迁移后输入位于 `../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/{ces,daisy}/`；R2 的复跑与旧输出比较见 [学习笔记](../docs/steps/02-fyst-dependency-patch.md)。
 
 ```bash
 python examples/02_save_trajectory.py \
@@ -89,7 +91,8 @@ legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/dais
 ```
 
 这里的 workspace 指本 repo 的父目录；从本 repo 出发在上述路径前加 `../`。
-对应 IERS 文件位于同一归档树的 `tests/data/finals2000A.all`。这些位置只说明
+对应 IERS 文件位于同一归档树的 `tests/data/finals2000A.all`，新 clone 的
+`../fyst-trajectories/tests/data/finals2000A.all` 与它逐字节相同，可用于当前复跑。这些位置只说明
 历史输入现存位置，loader 测试不依赖 sibling checkout。
 
 下列 SHA-256 原载于 `docs/validation.md`；本次只读检查归档文件，全部吻合，

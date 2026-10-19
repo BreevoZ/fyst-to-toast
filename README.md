@@ -34,15 +34,17 @@ fyst_toast/
 
 ## 环境与安装
 
-需要 Python ≥ 3.10 和已安装的 TOAST。运行 writer 另需 FYST trajectories 0.8.x；
+需要 Python ≥ 3.10 和已安装的 TOAST。运行 writer 另需 FYST trajectories 0.10.x；
 TOAST 本身有编译依赖，不由这些 example 自动安装。本机验证使用已有的 `fyst` conda
-环境、TOAST 3.0.5 和 FYST trajectories 0.8.0，版本声明不等于整个范围均已测试。
+环境、TOAST 3.0.5 和 FYST trajectories 0.10.0（`f095c51` 加下述补丁），版本声明不等于
+整个范围均已测试。
 
-**本次使用的是带本地时间解析修复的 FYST 0.8.0 working tree。** 现有 schedule 使用
+**当前使用的是带本地时间解析修复的 FYST 0.10.0 working tree。** 现有 schedule 使用
 `+00:00` UTC offset；所测试 FYST commit 的未修改 reader 无法直接解析这种字符串。
-该既有修复已作为 [兼容补丁](docs/patches/fyst-timeline-utc.patch) 随交接保存，来源和
-使用条件见 [验证记录](docs/validation.md#fyst-本地兼容修改)。仅安装同一版本号不保证
-能读取相同输入；本 repo 不会自动修改安装的 FYST。
+当前 [兼容补丁](docs/patches/fyst-trajectories-utc-offset_f095c51.patch) 的来源、重建命令和
+历史补丁区别见 [补丁说明](docs/patches/README.md)。仅安装同一版本号不保证能读取相同
+输入；本 repo 不会自动修改安装的 FYST。当前 env 通过静态 `.pth` 导入新 checkout，
+`__version__` 为 0.10.0；pip metadata 中残留的 0.8.0 不代表实际运行代码。
 
 在已有依赖和 setuptools ≥ 77 的环境中，从本 repo 根目录运行：
 
@@ -99,7 +101,7 @@ CES 和 Daisy 使用同一个脚本，切换输入即可，不需要改变 write
 
 ```bash
 python examples/02_save_trajectory.py \
-  ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
+  ../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all
 ```
 

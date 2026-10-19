@@ -1,0 +1,355 @@
+diff --git a/docs/overhead_io.rst b/docs/overhead_io.rst
+index f7d8acf..a064508 100644
+--- a/docs/overhead_io.rst
++++ b/docs/overhead_io.rst
+@@ -191,6 +191,14 @@ coordinates stored as ``Quantity`` header metadata. TOAST's
+ ``GroundSchedule`` v5 reader can therefore read them directly, ignoring
+ the FYST extension columns.
+ 
++All block times, timeline window metadata, and empty placeholder times use
++UTC ISO-8601 strings with six fractional digits and an explicit ``+00:00``
++offset, for example ``2026-08-02T01:25:00.123456+00:00``. Without an offset,
++TOAST's ``datetime.fromisoformat`` produces a naive datetime whose
++``timestamp()`` depends on the host timezone. ``read_timeline`` also accepts
++legacy offset-free UTC strings, ``Z``, and non-zero offsets, converting the
++latter to the corresponding UTC instant.
++
+ Standard TOAST schedule files (without ``block_type``, ``scan_type``,
+ ``rising``, or the patch-geometry extension columns) are also supported on
+ read. They are interpreted as all-science timelines with sensible defaults
+diff --git a/src/fyst_trajectories/overhead/io.py b/src/fyst_trajectories/overhead/io.py
+index 4c7606c..7b3bbc7 100644
+--- a/src/fyst_trajectories/overhead/io.py
++++ b/src/fyst_trajectories/overhead/io.py
+@@ -8,6 +8,7 @@ import dataclasses
+ import json
+ import math
+ import warnings
++from datetime import datetime, timezone
+ from pathlib import Path
+ 
+ from astropy import units as u
+@@ -39,6 +40,19 @@ __all__ = [
+ ]
+ 
+ 
++def _iso_utc(value: Time | str) -> str:
++    """Serialize a normalized UTC instant with an offset and microsecond precision."""
++    return _utc_instant(value).to_datetime(timezone=timezone.utc).isoformat(timespec="microseconds")
++
++
++def _read_time(value: str) -> Time:
++    """Read legacy astropy strings or ISO strings with an explicit UTC offset."""
++    try:
++        return Time(value, scale="utc")
++    except ValueError:
++        return Time(datetime.fromisoformat(value.replace("Z", "+00:00")), scale="utc")
++
++
+ # Metadata key used for per-block retune event provenance. When a block's
+ # ``metadata`` carries this key (value: a sequence of
+ # :class:`~fyst_trajectories.trajectory.RetuneEvent`), the ECSV writer
+@@ -111,9 +125,10 @@ def write_timeline(
+     bounds only for science and calibration rows. ``az_final`` holds the
+     azimuth a swept block ends at when that differs from ``azmax``, and
+     is ``nan`` (read back as ``None``) on every other block.
+-    Every time is written as a UTC ISO string to the millisecond, the form
+-    ``read_timeline`` reads, whatever scale, ``precision`` or
+-    ``out_subfmt`` the timeline's ``Time`` objects carry.
++    Every time is written as an ISO string with microsecond precision and
++    an explicit UTC offset (``+00:00``), whatever scale, ``precision`` or
++    ``out_subfmt`` the timeline's ``Time`` objects carry. The offset keeps
++    TOAST's datetime parsing independent of the host timezone.
+     The timeline window, site, overhead model, and calibration policy
+     are stored in the table header metadata, so ``read_timeline``
+     restores them.
+@@ -143,8 +158,8 @@ def write_timeline(
+         meta_for_json = _encode_retune_events_for_json(dict(meta))
+         rows.append(
+             {
+-                "start_time": _utc_instant(block.t_start).iso,
+-                "stop_time": _utc_instant(block.t_stop).iso,
++                "start_time": _iso_utc(block.t_start),
++                "stop_time": _iso_utc(block.t_stop),
+                 "boresight_angle": bangle,
+                 "name": block.patch_name,
+                 "azmin": block.az_start,
+@@ -212,8 +227,8 @@ def write_timeline(
+     # window would otherwise shrink to the block extents on read). Stored as ISO
+     # strings in UTC, mirroring the block time columns. Files without these keys
+     # fall back to the block-extent derivation in ``read_timeline``.
+-    table.meta["timeline_start_time"] = _utc_instant(timeline.start_time).iso
+-    table.meta["timeline_end_time"] = _utc_instant(timeline.end_time).iso
++    table.meta["timeline_start_time"] = _iso_utc(timeline.start_time)
++    table.meta["timeline_end_time"] = _iso_utc(timeline.end_time)
+     table.meta["timeline_is_empty"] = substituted
+     table.meta["site_name"] = timeline.site.name
+     table.meta["site_description"] = timeline.site.description
+@@ -279,18 +294,12 @@ def read_timeline(path: str | Path) -> ObservingTimeline:
+     blocks: the single placeholder row such a file carries exists only
+     because ECSV cannot hold a typed table with no rows.
+ 
+-    Block times are stored in UTC to millisecond precision, so a block's
+-    start and stop can shift by up to half a millisecond across a round
+-    trip.
+-    For a timeline whose times are UTC ``Time`` objects with astropy's
+-    default ``precision`` and ``out_subfmt``, as the planners and
+-    ``read_timeline`` hold them, the rendered forms (``str(timeline)``,
+-    the summary and the dispatch sheet) are byte-identical either way,
+-    except that on a day with a leap second the sheet's
+-    ``scheduled_t0_unix`` can differ in its last digit; an equality test
+-    on raw durations is not. A planet pass's ``search_start`` is two floats in
+-    the ``block_meta_json`` column and reads back exactly, so the pass
+-    rebuilds the same from the file as from memory.
++    Times accept legacy astropy ISO strings (interpreted as UTC), ``Z``,
++    and explicit offsets, which are converted to UTC. New files store
++    microsecond precision, so a block's start and stop can shift by up to
++    half a microsecond across a round trip. A planet pass's ``search_start``
++    is two floats in the ``block_meta_json`` column and reads back exactly,
++    so the pass rebuilds the same from the file as from memory.
+ 
+     Parameters
+     ----------
+@@ -404,8 +413,8 @@ def read_timeline(path: str | Path) -> ObservingTimeline:
+ 
+     blocks = []
+     for row in rows:
+-        t_start = Time(str(row["start_time"]), scale="utc")
+-        t_stop = Time(str(row["stop_time"]), scale="utc")
++        t_start = _read_time(str(row["start_time"]))
++        t_stop = _read_time(str(row["stop_time"]))
+ 
+         block_type = str(row["block_type"]) if has_block_type else "science"
+         scan_type = str(row["scan_type"]) if has_scan_type else ""
+@@ -487,8 +496,8 @@ def read_timeline(path: str | Path) -> ObservingTimeline:
+     _meta_start = meta.get("timeline_start_time")
+     _meta_end = meta.get("timeline_end_time")
+     if _meta_start is not None and _meta_end is not None:
+-        tl_start = Time(str(_meta_start), scale="utc")
+-        tl_end = Time(str(_meta_end), scale="utc")
++        tl_start = _read_time(str(_meta_start))
++        tl_end = _read_time(str(_meta_end))
+     elif blocks:
+         tl_start = min(b.t_start for b in blocks)
+         tl_end = max(b.t_stop for b in blocks)
+@@ -610,8 +619,8 @@ def _empty_row() -> dict:
+     """
+     t0 = Time("2000-01-01T00:00:00", scale="utc")
+     return {
+-        "start_time": t0.iso,
+-        "stop_time": t0.iso,
++        "start_time": _iso_utc(t0),
++        "stop_time": _iso_utc(t0),
+         "boresight_angle": 0.0,
+         "name": "",
+         "azmin": 0.0,
+diff --git a/tests/overhead/test_io.py b/tests/overhead/test_io.py
+index c5a1eba..e8e5a44 100644
+--- a/tests/overhead/test_io.py
++++ b/tests/overhead/test_io.py
+@@ -270,10 +270,10 @@ class TestTimesAreWrittenInUtc:
+     @pytest.mark.parametrize(
+         "attributes", [{"precision": 0}, {"out_subfmt": "date"}], ids=["precision 0", "date"]
+     )
+-    def test_a_utc_timeline_with_other_output_attributes_writes_millisecond_strings(
++    def test_a_utc_timeline_with_other_output_attributes_writes_aware_microsecond_strings(
+         self, attributes, tmp_path
+     ):
+-        """The times are written to the millisecond whatever the ``Time`` objects print.
++        """Times have UTC offsets and microseconds whatever the ``Time`` objects print.
+ 
+         Every time is moved 0.3714 s off the whole second, so a string to
+         the second, or a date alone, would read back at another instant.
+@@ -297,14 +297,14 @@ class TestTimesAreWrittenInUtc:
+         write_timeline(timeline, path)
+ 
+         table = Table.read(path, format="ascii.ecsv")
+-        millisecond = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}")
++        microsecond_utc = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00")
+         strings = [
+             *table["start_time"],
+             *table["stop_time"],
+             table.meta["timeline_start_time"],
+             table.meta["timeline_end_time"],
+         ]
+-        assert all(millisecond.fullmatch(str(s)) for s in strings), strings
++        assert all(microsecond_utc.fullmatch(str(s)) for s in strings), strings
+         back = read_timeline(path)
+         for block, original in zip(back.blocks, utc.blocks, strict=True):
+             assert abs((block.t_start - (original.t_start + shift)).to_value("s")) <= 5e-4
+@@ -339,8 +339,8 @@ class TestCanonicalColumnNames:
+ 
+         table = Table.read(str(path), format="ascii.ecsv")
+         first = str(table["start_time"][0])
+-        # ISO format looks like "2026-06-15 02:00:00.000"
+-        assert first == "2026-06-15 02:00:00.000"
++        # ISO format includes microseconds and an explicit UTC offset for TOAST.
++        assert first == "2026-06-15T02:00:00.000000+00:00"
+ 
+ 
+ class TestEmptyTimelineRoundTrip:
+diff --git a/tests/overhead/test_io_timestamps.py b/tests/overhead/test_io_timestamps.py
+new file mode 100644
+index 0000000..105f619
+--- /dev/null
++++ b/tests/overhead/test_io_timestamps.py
+@@ -0,0 +1,159 @@
++"""UTC serialization regressions that also run without an installed TOAST."""
++
++from dataclasses import replace
++from datetime import datetime, timedelta, timezone
++
++import numpy as np
++import pytest
++from astropy.table import QTable
++from astropy.time import Time, TimeDelta
++
++from fyst_trajectories import get_fyst_site
++from fyst_trajectories.overhead import (
++    CalibrationPolicy,
++    ObservingTimeline,
++    OverheadModel,
++    TimelineBlock,
++    read_timeline,
++    write_timeline,
++)
++
++
++def _timeline(scale="utc"):
++    start = getattr(Time("2026-01-15T23:59:59.123456", scale="utc", precision=3), scale)
++    stop = start + TimeDelta(2.345678, format="sec")
++    block = TimelineBlock(
++        t_start=start,
++        t_stop=stop,
++        block_type="science",
++        patch_name="clock test",
++        az_start=-5.0,
++        az_end=5.0,
++        elevation=50.0,
++        scan_index=7,
++        subscan_index=2,
++    )
++    return ObservingTimeline(
++        blocks=[block],
++        site=get_fyst_site(),
++        start_time=start,
++        end_time=stop,
++        overhead_model=OverheadModel(),
++        calibration_policy=CalibrationPolicy(),
++    )
++
++
++@pytest.mark.parametrize("scale", ["utc", "tai", "tt"])
++def test_export_times_are_aware_utc_and_keep_microseconds(tmp_path, scale):
++    timeline = _timeline(scale)
++    path = tmp_path / "time.ecsv"
++    write_timeline(timeline, path)
++    table = QTable.read(path)
++    pairs = [
++        (table[0]["start_time"], timeline.start_time),
++        (table[0]["stop_time"], timeline.end_time),
++        (table.meta["timeline_start_time"], timeline.start_time),
++        (table.meta["timeline_end_time"], timeline.end_time),
++    ]
++    for text, expected in pairs:
++        parsed = datetime.fromisoformat(text)
++        assert parsed.tzinfo is not None
++        assert parsed.utcoffset() == timedelta(0)
++        assert abs(parsed.timestamp() - expected.utc.unix) <= 1e-6
++        assert text == parsed.isoformat(timespec="microseconds")
++        assert text.endswith("+00:00")  # accepted by datetime.fromisoformat on Python 3.10
++    assert timeline.start_time.precision == 3  # must not mutate input display precision
++    assert timeline.start_time.scale == scale
++    restored = read_timeline(path)
++    np.testing.assert_allclose(
++        [
++            restored.blocks[0].t_start.unix,
++            restored.blocks[0].t_stop.unix,
++            restored.start_time.unix,
++            restored.end_time.unix,
++        ],
++        [timeline.start_time.unix, timeline.end_time.unix] * 2,
++        rtol=0,
++        atol=1e-6,
++    )
++
++
++@pytest.mark.parametrize("with_window", [True, False], ids=["window", "block_extents"])
++@pytest.mark.parametrize(
++    "style", ["legacy", "legacy_microseconds", "Z", "+00:00", "+05:30", "-04:00"]
++)
++def test_reader_accepts_old_and_offset_iso_times(tmp_path, style, with_window):
++    timeline = _timeline()
++    path = tmp_path / "external.ecsv"
++    write_timeline(timeline, path)
++    table = QTable.read(path)
++
++    def render(time):
++        if style == "legacy":
++            return time.iso  # upstream format: a space, milliseconds, no offset
++        instant = time.to_datetime(timezone=timezone.utc)
++        if style == "legacy_microseconds":
++            return instant.replace(tzinfo=None).isoformat(sep=" ", timespec="microseconds")
++        if style == "Z":
++            return instant.isoformat(timespec="microseconds").replace("+00:00", "Z")
++        offset = {
++            "+00:00": timedelta(0),
++            "+05:30": timedelta(hours=5, minutes=30),
++            "-04:00": timedelta(hours=-4),
++        }[style]
++        return instant.astimezone(timezone(offset)).isoformat(timespec="microseconds")
++
++    # Replace columns so longer offset strings cannot be truncated by the old dtype width.
++    table["start_time"] = [render(timeline.start_time)]
++    table["stop_time"] = [render(timeline.end_time)]
++    if with_window:
++        table.meta["timeline_start_time"] = render(timeline.start_time)
++        table.meta["timeline_end_time"] = render(timeline.end_time)
++    else:
++        del table.meta["timeline_start_time"]
++        del table.meta["timeline_end_time"]
++    table.write(path, overwrite=True)
++    restored = read_timeline(path)
++    # Legacy millisecond input can only preserve the precision present in the file.
++    expected = [timeline.start_time, timeline.end_time]
++    if style == "legacy":
++        expected = [Time(t.iso, scale="utc") for t in expected]
++    actual = [
++        restored.blocks[0].t_start,
++        restored.blocks[0].t_stop,
++        restored.start_time,
++        restored.end_time,
++    ]
++    assert all(t.scale == "utc" for t in actual)
++    np.testing.assert_allclose(
++        [t.unix for t in actual], [t.unix for t in expected] * 2, rtol=0, atol=1e-6
++    )
++
++
++def test_empty_timeline_has_aware_placeholder_and_preserves_window(tmp_path):
++    timeline = replace(_timeline("tai"), blocks=[])
++    path = tmp_path / "empty.ecsv"
++    write_timeline(timeline, path)
++    table = QTable.read(path)
++    assert len(table) == 1
++    assert table.meta["timeline_is_empty"] is True
++    for column in ("start_time", "stop_time"):
++        assert table[column][0] == "2000-01-01T00:00:00.000000+00:00"
++    for key, expected in (
++        ("timeline_start_time", timeline.start_time),
++        ("timeline_end_time", timeline.end_time),
++    ):
++        parsed = datetime.fromisoformat(table.meta[key])
++        assert parsed.tzinfo is not None
++        assert parsed.utcoffset() == timedelta(0)
++        assert table.meta[key] == parsed.isoformat(timespec="microseconds")
++        assert abs(parsed.timestamp() - expected.unix) <= 1e-6
++    restored = read_timeline(path)
++    assert restored.blocks == []
++    assert "timeline_is_empty" not in restored.metadata
++    np.testing.assert_allclose(
++        [restored.start_time.unix, restored.end_time.unix],
++        [timeline.start_time.unix, timeline.end_time.unix],
++        rtol=0,
++        atol=1e-6,
++    )

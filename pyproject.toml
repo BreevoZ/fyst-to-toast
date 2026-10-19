@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-writer = ["fyst-trajectories>=0.8,<0.9"]
+# Also requires the current UTC-offset patch in docs/patches; pip cannot express it.
+writer = ["fyst-trajectories>=0.10,<0.11"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
