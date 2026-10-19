@@ -3,9 +3,10 @@
 将 FYST trajectory 转为 TOAST Observation 的独立研究 package：FYST 决定运动，
 TOAST 使用逐样本轨迹。安装名称为 `fyst-to-toast`，import 名称为 `fyst_to_toast`。
 
-**generator、H5 writer 和单 block loader 已实现；`SimFYST` 仍是 CES baseline，尚未接入 loader。**
-目前可生成 CES / Daisy、保存及读回原生 TOAST H5；五个示意 detectors 和固定 roll
-用于诊断，尚未实现真实仪器或 sky / noise simulation。
+**B2.2 已实现：`SimFYST` 可从一个 native trajectory H5 block 创建使用 caller Telescope
+的 Observation，保留原始时间 / 轨迹并计算 geometry。** CES / Daisy 均可输入；未提供
+`trajectory_file` 时仍走原 CES baseline。trajectory 模式尚未派生 shared flags / 扫描
+intervals（B2.3）或方向区间（B3），也未验收真实仪器或 sky / noise simulation。
 
 ## 安装与运行环境
 
@@ -57,7 +58,7 @@ SHA-256，每 native block 写一个 H5；`files.json` 列出本轮文件，
 改为 `daisy` 并另选目录可运行 Daisy；已有输出默认拒绝覆盖。
 完整参数见 `--help`，交互查看方式见 [tools](tools/README.md)。
 
-独立 loader 的最小调用（尚未由 `SimFYST` 调用）：
+独立 loader 的最小调用（`SimFYST` 的 trajectory 分支也复用此接口）：
 
 ```bash
 python - <<'PY'
@@ -77,13 +78,38 @@ python examples/01_ces_baseline.py --output-dir "$RUN_DIR/ces_baseline"
 `SimFYST` 的 Observation，不使用生成的 FYST trajectory。数据约定与限制见
 [architecture](docs/architecture.md)。
 
+## 单 block SimFYST 教学示例
+
+直接使用已提交 fixture，无需重新生成轨迹：
+
+```bash
+export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+python examples/02_simfyst_trajectory.py
+python tools/h5reader.py output/simfyst/fyst_ces_000_001/fyst_ces_000_001.h5 --tree
+# 也可输入 Daisy；输出目录按 source Observation name 分开。
+python examples/02_simfyst_trajectory.py data/fyst_daisy_003_000.h5
+python -m pytest tests -q
+```
+
+示例显式建立 source site 坐标上的 caller Telescope（两个 boresight detectors、标称
+10 Hz），打印字段 dtype / shape / 契约单位、metadata 与 rate check，再通过原生
+`SaveHDF5` 保存；输出目录存在时必须传 `--overwrite` 才能重跑。
+输出默认含 16 个 shared arrays（12 个原始输入 + 4 个派生 geometry）与清零的 detector
+signal / flags；文件里的五个 demo detectors 不用作运行仪器。
+
+library 用法为 `SimFYST(telescope=caller_telescope, trajectory_file=str(path)).apply(data)`，
+要求空 `Data`、串行、caller site 与 source site 的 Cartesian 距离 ≤1 mm；caller sample
+rate 与实际时钟相对误差 ≤1e-6，不重采样。`trajectory_boresight_angle=None` 使用来源
+`roll_deg`，显式 angle Quantity 可覆盖并记录来源。weather、HWP、detector filtering /
+splitting、修改运动的参数暂不支持；原 JSON 与 source hashes 单独保留。
+
 ## 目录与阅读入口
 
 | 位置 | 用途 |
 |---|---|
-| `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES operator |
+| `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 单 block trajectory operator |
 | `scripts/` | generate / save 两个 pipeline CLI |
-| `examples/` | `01_ces_baseline.py` 教学 demo |
+| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo |
 | `tools/`、`tests/`、[data/](data/README.md) | 手动检查、pytest、两份已提交 H5 fixtures |
 | [docs/architecture.md](docs/architecture.md) | 当前数据流与稳定契约 |
 | `docs/steps/`（仅本地） | 学习笔记与阅读顺序，不上传远端 |

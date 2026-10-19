@@ -1,0 +1,456 @@
+"""B2.2: independent native-geometry / byte checks on committed fixtures only."""
+
+import os
+
+for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+    os.environ[key] = "1"
+
+import hashlib
+import json
+import socket
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
+
+import h5py
+import numpy as np
+import pytest
+from astropy import units as u
+from astropy.coordinates import solar_system_ephemeris
+from astropy.utils import iers
+from toast import Data
+from toast import qarray as qa
+from toast.coordinates import azel_to_radec
+from toast.instrument import Focalplane, GroundSite, Telescope
+from toast.instrument_sim import fake_boresight_focalplane
+from toast.mpi import Comm
+from toast.schedule import GroundSchedule
+from toast.utils import name_UID
+
+from fyst_to_toast import sim_fyst
+from fyst_to_toast.sim_fyst import SimFYST
+from fyst_to_toast.trajectory_h5 import _TRAJECTORY_FIELDS, _load_trajectory_block
+
+iers.conf.auto_download = False
+SAMPLES = Path(__file__).resolve().parents[1] / "data"
+
+
+@pytest.fixture(params=["fyst_ces_000_001.h5", "fyst_daisy_003_000.h5"])
+def source(request, monkeypatch):
+    path = SAMPLES / request.param
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("Network is forbidden in trajectory tests")
+
+    monkeypatch.setattr(socket.socket, "connect", no_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
+    monkeypatch.setattr(socket, "create_connection", no_network)
+    with h5py.File(path, "r") as saved:
+        # This oracle never uses the adapter loader to obtain expected arrays/site.
+        arrays = {key: saved[f"shared/{key}"][()] for key in _TRAJECTORY_FIELDS}
+        metadata = dict(saved["metadata/other"].attrs)
+        site = dict(saved["instrument"].attrs)
+        name = saved.attrs["observation_name"]
+    with solar_system_ephemeris.set("builtin"):
+        yield SimpleNamespace(
+            path=path, arrays=arrays, metadata=metadata, site=site, name=name
+        )
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+
+
+def caller(source, n_pix=1, rate=10, height_offset=0):
+    full = fake_boresight_focalplane(n_pix=n_pix, sample_rate=rate * u.Hz)
+    table = full.detector_data.copy()
+    table["name"] = [f"caller-{i}" for i in range(len(table))]
+    fp = Focalplane(
+        detector_data=table, sample_rate=rate * u.Hz, field_of_view=full.field_of_view
+    )
+    site = GroundSite(
+        "caller-site",
+        source.site["site_lat_deg"] * u.deg,
+        source.site["site_lon_deg"] * u.deg,
+        (source.site["site_alt_m"] + height_offset) * u.m,
+    )
+    return Telescope("caller-telescope", focalplane=fp, site=site)
+
+
+@pytest.fixture
+def data():
+    value = Data(Comm(world=None))
+    yield value
+    value.clear()
+
+
+def quaternion_equal(actual, expected):
+    assert np.isfinite(actual).all()
+    assert np.max(np.abs(np.linalg.norm(actual, axis=1) - 1)) < 1e-12
+    distance = np.minimum(
+        np.linalg.norm(actual - expected, axis=1),
+        np.linalg.norm(actual + expected, axis=1),
+    )
+    assert np.max(distance) < 1e-12
+
+
+@pytest.mark.parametrize("n_pix,roll", [(1, None), (3, 10 * u.deg)])
+def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
+    spies = []
+    for module, name in (
+        (sim_fyst, "simulate_ces_scan"),
+        (sim_fyst, "simulate_elnod"),
+        (GroundSchedule, "read"),
+    ):
+        spy = Mock(side_effect=AssertionError(f"{name} must never run"))
+        monkeypatch.setattr(module, name, spy)
+        spies.append(spy)
+    telescope = caller(source, n_pix=n_pix)
+    detector_table = telescope.focalplane.detector_data.copy()
+    op = SimFYST(
+        telescope=telescope,
+        trajectory_file=str(source.path),
+        trajectory_boresight_angle=roll,
+    )
+    op.apply(data)
+    for spy in spies:
+        spy.assert_not_called()
+    assert len(data.obs) == 1
+    obs = data.obs[0]
+    t, az, el = (source.arrays[key] for key in ("times", "azimuth", "elevation"))
+    assert obs.n_local_samples == len(t)
+    assert obs.name == source.name and obs.uid == name_UID(source.name)
+    assert obs.session.name == source.name and obs.session.uid == name_UID(source.name)
+    assert obs.session.start == datetime.fromtimestamp(t[0], tz=timezone.utc)
+    assert obs.session.end == datetime.fromtimestamp(t[-1], tz=timezone.utc)
+    assert obs.telescope is telescope
+    assert obs.telescope.site.name == "caller-site"
+    assert obs.telescope.name == "caller-telescope"
+    assert obs.local_detectors == [f"caller-{i}" for i in range(2 * n_pix)]
+    assert obs.local_detectors == telescope.focalplane.detectors
+    for key in detector_table.colnames:
+        np.testing.assert_array_equal(
+            telescope.focalplane.detector_data[key], detector_table[key]
+        )
+    assert telescope.focalplane.sample_rate == 10 * u.Hz
+    for key, expected in source.arrays.items():
+        actual = obs.shared[key].data
+        assert actual.dtype == expected.dtype and actual.shape == expected.shape, key
+        assert actual.tobytes() == expected.tobytes(), key
+    for key, dtype, units in (
+        (op.det_data, np.float64, u.K),
+        (op.det_flags, np.uint8, u.dimensionless_unscaled),
+    ):
+        actual = obs.detdata[key]
+        assert actual.shape == (2 * n_pix, len(t))
+        assert actual.dtype == dtype and actual.units == units
+        assert np.count_nonzero(actual.data) == 0
+
+    source_info = json.loads(source.metadata["trajectory_info"])
+    roll_deg = source_info["roll_deg"] if roll is None else roll.to_value(u.deg)
+    expected_bore = qa.from_lonlat_angles(-az, el, np.zeros_like(el))
+    expected_bore = qa.mult(
+        expected_bore, qa.rotation(np.array([0.0, 0.0, 1.0]), np.deg2rad(roll_deg))
+    )
+    quaternion_equal(obs.shared[op.boresight_azel].data, expected_bore)
+    lon, lat, _ = qa.to_lonlat_angles(obs.shared[op.boresight_azel].data)
+    delta_az = np.arctan2(np.sin(-lon - az), np.cos(-lon - az))
+    assert np.max(np.abs(delta_az)) < 1e-12
+    np.testing.assert_allclose(lat, el, atol=1e-12, rtol=0)
+    expected_radec = azel_to_radec(
+        telescope.site,
+        t,
+        expected_bore,
+        use_ephem=True,
+        use_qpoint=False,
+        so3g_compat_mode=False,
+    )
+    quaternion_equal(obs.shared[op.boresight_radec].data, expected_radec)
+    pos, vel = telescope.site.position_velocity(t)
+    np.testing.assert_array_equal(obs.shared[op.position].data, pos)
+    np.testing.assert_array_equal(obs.shared[op.velocity].data, vel)
+
+    assert obs["trajectory_info"] == source.metadata["trajectory_info"]
+    assert json.loads(obs["source_shared_array_sha256"]) == json.loads(
+        source.metadata["shared_array_sha256"]
+    )
+    assert "shared_array_sha256" not in obs
+    info = json.loads(obs["simfyst_info"])
+    assert info["contract_version"] == "B2.2"
+    assert info["source_file"] == source.path.name
+    assert info["source_sha256"] == hashlib.sha256(source.path.read_bytes()).hexdigest()
+    assert info["samples"] == len(t)
+    assert info["first_time_unix_s"] == t[0] and info["last_time_unix_s"] == t[-1]
+    actual_rate = (len(t) - 1) / (t[-1] - t[0])
+    assert info["rate_check"] == {
+        "nominal_rate_hz": 10.0,
+        "actual_rate_hz": actual_rate,
+        "relative_error": abs(10 - actual_rate) / actual_rate,
+        "rtol": 1e-6,
+    }
+    assert info["roll_deg"] == roll_deg
+    assert info["roll_source"] == (
+        "trajectory_info.roll_deg" if roll is None else "trajectory_boresight_angle"
+    )
+    assert (
+        info["caller_telescope"] == telescope.name
+        and info["caller_site"] == telescope.site.name
+    )
+    assert info["coordinate_backend"] == {
+        "use_ephem": True,
+        "use_qpoint": False,
+        "so3g_compat_mode": False,
+    }
+    assert info["max_phase_residual_s"] <= info["time_tolerance_s"]
+    assert info["flags/intervals"] == "not yet derived (B2.3)"
+    assert op.shared_flags not in obs.shared
+    # TOAST creates this structural interval in every Observation constructor.
+    assert set(obs.intervals) == {"ALL_OBSERVATION_SAMPLES"}
+    assert set(op.provides()["shared"]) == set(obs.shared)
+    assert set(op.provides()["detdata"]) == set(obs.detdata)
+    assert op.provides()["intervals"] == []
+
+
+UNSUPPORTED = [
+    ("schedule", GroundSchedule()),
+    ("schedule_file", "unused.ecsv"),
+    ("telescope_file", "unused.h5"),
+    ("distribute_time", True),
+    ("detset_key", "band"),
+    ("session_split_key", "band"),
+    ("weather", "atacama"),
+    ("max_pwv", 1 * u.mm),
+    ("median_weather", True),
+    ("hwp_step_time", 1 * u.s),
+    ("elnod_start", True),
+    ("elnod_end", True),
+    ("elnod_every_scan", True),
+    ("elnods", [1.0]),
+    ("el_mod_step", 1 * u.deg),
+    ("el_mod_rate", 1 * u.Hz),
+    ("el_mod_amplitude", 2 * u.deg),
+    ("el_mod_sine", True),
+    ("el_mod_sine_phase", 1 * u.deg),
+    ("randomize_phase", True),
+    ("track_azimuth", True),
+    ("scan_cosecant_modulation", True),
+    ("fix_rate_on_sky", False),
+    ("scan_rate_az", 2 * u.deg / u.s),
+    ("scan_rate_el", 2 * u.deg / u.s),
+    ("scan_accel_az", 2 * u.deg / u.s**2),
+    ("scan_accel_el", 2 * u.deg / u.s**2),
+    ("times", "fyst_time_s"),
+    ("position", "azimuth"),
+    ("velocity", "position"),
+    ("det_data", "flags"),
+    ("trajectory_boresight_angle", np.nan * u.deg),
+    ("trajectory_boresight_angle", np.inf * u.deg),
+]
+
+
+@pytest.mark.parametrize(
+    "key,value", UNSUPPORTED, ids=[item[0] for item in UNSUPPORTED]
+)
+def test_unsupported_settings(source, data, key, value):
+    match = {
+        "times": "original fields",
+        "position": "distinct",
+        "velocity": "distinct",
+        "det_data": "distinct",
+        "trajectory_boresight_angle": "finite",
+    }.get(key, key)
+    with pytest.raises(ValueError, match=match):
+        SimFYST(
+            telescope=caller(source), trajectory_file=str(source.path), **{key: value}
+        ).apply(data)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"hwp_angle": "hwp", "hwp_rpm": 1.0},
+        {"hwp_angle": "hwp", "hwp_step": 1 * u.deg, "hwp_step_time": 1 * u.s},
+    ],
+)
+def test_hwp_settings(source, data, settings):
+    with pytest.raises(ValueError, match="hwp_"):
+        SimFYST(
+            telescope=caller(source), trajectory_file=str(source.path), **settings
+        ).apply(data)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize(
+    "mode", ["missing", "empty", "site", "weather", "rate", "detectors", "data"]
+)
+def test_caller_rejections(source, data, mode):
+    telescope = caller(
+        source,
+        rate=20 if mode == "rate" else 10,
+        height_offset=0.002 if mode == "site" else 0,
+    )
+    kwargs = {}
+    match = {
+        "missing": "caller.*Telescope",
+        "empty": "non-empty.*focalplane",
+        "site": "1 mm",
+        "weather": "site weather",
+        "rate": "Nominal sample rate 20 Hz does not match actual",
+        "detectors": "filtering",
+        "data": "empty data.obs",
+    }[mode]
+    if mode == "missing":
+        telescope = None
+    elif mode == "empty":
+        telescope.focalplane = Focalplane(
+            detector_data=telescope.focalplane.detector_data[:0],
+            sample_rate=10 * u.Hz,
+            field_of_view=1 * u.deg,
+        )
+    elif mode == "weather":
+        telescope.site.weather = object()
+    elif mode == "detectors":
+        kwargs["detectors"] = []
+    elif mode == "data":
+        # Preserve pre-existing caller content instead of clearing it on rejection.
+        data.obs.append(object())
+    before = list(data.obs)
+    try:
+        with pytest.raises(ValueError, match=match):
+            SimFYST(telescope=telescope, trajectory_file=str(source.path)).apply(
+                data, **kwargs
+            )
+        assert data.obs == before
+    finally:
+        data.obs.clear()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("world_size", 2),
+        ("group_size", 2),
+        ("ngroups", 2),
+        ("comm_world", object()),
+        ("comm_group", object()),
+    ],
+)
+def test_serial_rejection(source, key, value):
+    comm = {
+        "world_size": 1,
+        "group_size": 1,
+        "ngroups": 1,
+        "comm_world": None,
+        "comm_group": None,
+    }
+    comm[key] = value
+    data = SimpleNamespace(comm=SimpleNamespace(**comm), obs=[])
+    with pytest.raises(ValueError, match="serial.*MPI"):
+        SimFYST(telescope=caller(source), trajectory_file=str(source.path))._exec(data)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize("roll", [None, float("nan"), float("inf"), "invalid"])
+def test_bad_source_roll(source, data, monkeypatch, roll):
+    block = _load_trajectory_block(source.path)
+    info = dict(block.trajectory_info)
+    if roll is None:
+        del info["roll_deg"]
+    else:
+        info["roll_deg"] = roll
+    monkeypatch.setattr(
+        sim_fyst,
+        "_load_trajectory_block",
+        lambda path: replace(block, trajectory_info=info),
+    )
+    op = SimFYST(telescope=caller(source), trajectory_file=str(source.path))
+    with pytest.raises(ValueError, match="roll_deg.*finite"):
+        op.apply(data)
+    assert data.obs == []
+    # Explicit roll overrides even an unusable source default; original JSON stays intact.
+    op.trajectory_boresight_angle = 10 * u.deg
+    op.apply(data)
+    assert data.obs[0]["trajectory_info"] == block.trajectory_info_json
+
+
+@pytest.mark.parametrize(
+    "det_data,det_flags", [(None, None), (None, "quality"), ("signal", None)]
+)
+def test_optional_detdata_aliases_and_site_tolerance(source, data, det_data, det_flags):
+    op = SimFYST(
+        telescope=caller(source, height_offset=0.0005),
+        trajectory_file=str(source.path),
+        det_data=det_data,
+        det_flags=det_flags,
+        det_data_units=u.mK,
+        times="clock",
+        azimuth="az",
+        elevation="el",
+        boresight_azel="horizontal",
+        boresight_radec="equatorial",
+        position="pos",
+        velocity="vel",
+    )
+    op.apply(data)
+    obs = data.obs[0]
+    assert set(obs.detdata) == {key for key in (det_data, det_flags) if key is not None}
+    assert set(op.provides()["detdata"]) == set(obs.detdata)
+    if det_data is not None:
+        assert obs.detdata[det_data].units == u.mK
+        assert np.count_nonzero(obs.detdata[det_data].data) == 0
+    assert set(op.provides()["shared"]) == set(obs.shared)
+    for alias, native in (("clock", "times"), ("az", "azimuth"), ("el", "elevation")):
+        assert obs.shared[alias].data.tobytes() == source.arrays[native].tobytes()
+        assert obs.shared[native].data.tobytes() == source.arrays[native].tobytes()
+
+
+def test_allocation_failure_cleans_unappended_observation(source, data, monkeypatch):
+    original = sim_fyst.Observation
+    created = []
+
+    def failing_observation(*args, **kwargs):
+        obs = original(*args, **kwargs)
+        created.append(obs)
+        monkeypatch.setattr(obs, "clear", Mock(wraps=obs.clear))
+        monkeypatch.setattr(
+            obs.detdata, "ensure", Mock(side_effect=RuntimeError("allocation failure"))
+        )
+        return obs
+
+    monkeypatch.setattr(sim_fyst, "Observation", failing_observation)
+    with pytest.raises(RuntimeError, match="allocation failure"):
+        SimFYST(telescope=caller(source), trajectory_file=str(source.path)).apply(data)
+    assert data.obs == [] and len(created) == 1
+    created[0].clear.assert_called_once()
+
+
+def test_missing_ground_site(source, data):
+    telescope = caller(source)
+    telescope.site = None
+    with pytest.raises(TypeError, match="caller GroundSite"):
+        SimFYST(telescope=telescope, trajectory_file=str(source.path)).apply(data)
+    assert data.obs == []
+
+
+def test_coordinate_backend_options(source, data, monkeypatch):
+    native = Mock(wraps=azel_to_radec)
+    monkeypatch.setattr(sim_fyst, "azel_to_radec", native)
+    telescope = caller(source)
+    op = SimFYST(telescope=telescope, trajectory_file=str(source.path), use_ephem=False)
+    op.apply(data)
+    expected_options = {
+        "use_ephem": False,
+        "use_qpoint": False,
+        "so3g_compat_mode": False,
+    }
+    assert native.call_args.kwargs == expected_options
+    obs = data.obs[0]
+    expected = azel_to_radec(
+        telescope.site,
+        source.arrays["times"],
+        obs.shared[op.boresight_azel].data,
+        **expected_options,
+    )
+    quaternion_equal(obs.shared[op.boresight_radec].data, expected)
+    assert json.loads(obs["simfyst_info"])["coordinate_backend"] == expected_options

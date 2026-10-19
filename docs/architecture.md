@@ -13,21 +13,22 @@ FYST read_timeline → schedule_to_trajectories
 scripts/save_trajectory_h5.py → trajectory_h5.write_trajectory_blocks
     ↓ TOAST SaveHDF5：每 native block 一个 Observation H5 + files.json
 trajectory_h5._load_trajectory_block → 校验并复制原始轨迹
-    ↓ 未来 B2.2：结合调用者的 Telescope 接入 SimFYST（尚未实现）
+    ↓ SimFYST(trajectory_file=..., telescope=caller)：单 block time / geometry
 TOAST Data.obs / Observation → 后续模拟 operators
 ```
 
 另外，`examples/01_ces_baseline.py` 用同一 `GroundSchedule` / `Telescope` 分别运行
 原生 `SimGround` 与当前 `SimFYST`；两者仍自己生成 CES，不经过上述 trajectory 链。
 读取 schedule 成功不能证明逐样本运动保真。原生 `LoadHDF5` 恢复文件中的示意仪器与
-指向；未来 `SimFYST` 则要使用调用者的仪器，二者职责不同，无需先另造 raw H5 schema。
+指向；`SimFYST` trajectory 分支使用调用者的仪器并重新计算 geometry，二者职责不同，
+无需先另造 raw H5 schema。
 
 | 层 | 职责 |
 |---|---|
 | `generate.py` | 唯一 import FYST 的运行模块；调用原生调度与重建，保存 ECSV 和 generation report |
 | `trajectory_h5.py` | 共用 ECSV / H5 定义、内存 QTable → H5 writer、私有单 block loader 与时钟检查 |
 | `fyst_flags.py` | 本地 plain-int enum；可选 contract tests 与 FYST 核对 |
-| `sim_fyst.py` | CES baseline；尚无 `trajectory_file` 输入分支 |
+| `sim_fyst.py` | 保留 CES baseline；`trajectory_file` 提前分支，使用 caller Telescope 建 Observation |
 | `scripts/` | 参数、路径、覆盖保护、进程环境、离线 IERS 和 JSON 清单 |
 | `tools/` | 只读浏览及原生 LoadHDF5 roundtrip 验收，见 [工具说明](../tools/README.md) |
 
@@ -98,6 +99,53 @@ CLI 的 `files.json` 列出本轮 H5，读取时用清单避免混入旧文件�
   `abs(nominal-actual)/actual <= rtol`，返回两种 rate、relative error 和 rtol。
   允许微小频差不表示允许 gaps / jitter；不规则采样策略尚未实现。
 
+## SimFYST 单 block time / geometry（B2.2）
+
+`trajectory_file=None` 保持原 schedule/CES 路径。提供文件时，`_exec()` 在任何 schedule
+检查之前进入独立方法；既不读取 GroundSchedule，也不调用 CES / elnod generator。
+geometry 不按 pattern 分支，当前用已提交 CES（2611 samples）和 Daisy（399 samples）
+fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS 下载。
+
+- 必须显式提供有非空 Focalplane 与 GroundSite 的 caller Telescope；与 schedule /
+  schedule_file 互斥，不支持 telescope_file。source demo instrument 只用于 loader 读取，
+  不替换 caller 的 detector 名单、quaternions、sample rate、FOV、site 或 telescope 名称。
+- caller 与 source EarthLocation 的 Cartesian 距离须 ≤1 mm；名称可以不同。
+  `_check_sample_rate(caller_rate_Hz, actual_rate_Hz, rtol=1e-6)` 通过才继续，保留返回的
+  两种 rate、relative error、rtol；标称 10 Hz 在两个 fixtures 上通过，20 Hz 被拒绝。
+- 只支持空 `data.obs`、无 MPI communicator、world/group size=1、一个 group。
+  禁止 distribute_time、detset/session split、任何 detector selection；weather（包括
+  caller site 自带 weather）与任何 HWP 设置、非默认 motion 参数都明确拒绝。
+  motion 包括 elnods、El modulation / steps、randomize_phase、track_azimuth、cosecant、
+  scan rate / acceleration 和 fix_rate_on_sky；默认值在此分支不参与生成运动。
+- 使用 `Observation(comm, caller_telescope, N, process_rows=1, sample_sets=[[N]], ...)`。
+  name 来自 source Observation，Observation / Session UID 都用 `name_UID(name)`；Session
+  首末是原 timestamp 转 UTC datetime，shared times 保留完整原始 float64 精度。
+  校验 / 构造失败不会 append 半成品；已分配 Observation 用 native `clear()` 清理。
+- `_TRAJECTORY_FIELDS` 的全部 12 列保留原名 / dtype / shape / bytes，包括 times、Az、El，
+  不 wrap、不 round、不转换原始 degree / radian 副本。标准 output name traits 可设别名，
+  原始列仍保留；拒绝同名碰撞。默认新增两个 boresight quaternions 和 position / velocity，
+  合计 16 个 shared columns。detdata 由 caller detectors 决定：默认 float64 signal（K）和
+  uint8 flags，native allocator 全部清零；对应 name 为 None 时跳过。
+- boresight 使用 `qa.from_lonlat_angles(-az, el, 0)`；非零 roll **右乘**本地 z rotation，
+  与 SimGround 相同。`trajectory_boresight_angle=None` 使用 finite source `roll_deg`，
+  显式 angular Quantity 覆盖运行 roll；不改 source JSON，也不推断真实 Nasmyth 姿态。
+- `azel_to_radec` 接收原 times、caller site 和 operator 的 use_ephem / use_qpoint /
+  so3g_compat_mode。已执行默认 PyEphem 与 Astropy backend 测试；qpoint / so3g 未验收。
+  `site.position_velocity(times)` 的单位是 **km、km/s**，与 mount rates 不同。
+  TOAST 3.0.5 GroundSite 当前返回 Earth-center barycentric motion，尚未补站点平移。
+
+metadata 分开记录来源和当前计算：`trajectory_info` 为来源 JSON 原文；
+`source_shared_array_sha256` 为来源 manifest 的 JSON，不冒充当前输出 hashes；
+`simfyst_info` 是 JSON，记录 B2.2 contract、source basename / 整文件 SHA-256、N / 首末
+timestamp、rate check / clock residual、roll 与来源、caller telescope/site 名称、coordinate
+backend 选项及 `flags/intervals: not yet derived (B2.3)`。Shared arrays 本身无单位属性；
+示例打印契约单位，detdata 则带 native units。
+
+trajectory 分支不创建 shared flags、不派生扫描或 solar intervals，也不运行 AzimuthRanges。
+`_provides()` 只声明实际提供的 shared / detdata，intervals 为空；Observation 构造器自带的
+`ALL_OBSERVATION_SAMPLES` 仅描述全样本结构，不是扫描分类。见
+[教学示例](../examples/02_simfyst_trajectory.py) 与 [验收测试](../tests/test_sim_fyst_trajectory.py)。
+
 ## Flags、区间与科学边界
 
 FYST 是互斥 enum：UNCLASSIFIED=0、SCIENCE=1、TURNAROUND=2、RETUNE=3。
@@ -120,7 +168,7 @@ writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAS
 真实 FYST focalplane / Nasmyth roll 尚未验收。`detdata=[]`，没有 detector signal、
 sky / atmosphere / noise simulation，也没有用独立 astrometry reference 验证 RA/Dec。
 
-下一步是 **B2.2：SimFYST 接入单 block loader 与调用者 Telescope**；完整 flags /
-intervals、方向区间、多 block、Pong、MPI 和真实仪器另行推进。
+下一步是 **B2.3：trajectory shared flags / intervals**，之后是 **B3：方向区间**；
+多 block、Pong、MPI 和真实 focalplane / roll 另行推进。
 Daisy 高 El 的上游 acceleration warnings 仍未解决，历史现象及限制见 W2；
 CES / Daisy 串行 IO 通过不代表所有 patterns 或运动约束已经验收。

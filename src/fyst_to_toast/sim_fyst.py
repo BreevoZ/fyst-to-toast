@@ -3,16 +3,20 @@
 # a BSD-style license that can be found in the LICENSE file.
 # TOAST's LICENSE and AUTHORS for this file are in LICENSES/TOAST-BSD-2-Clause.txt and LICENSES/TOAST-AUTHORS.txt.
 
-# Stage 0: CES baseline copied from TOAST SimGround; no FYST trajectory reader yet.
-# Only the class name and imports have changed.  Source: hpc4cmb/toast 9595449a,
+# CES path copied unchanged from TOAST SimGround; optional single-block trajectory path.
+# Source: hpc4cmb/toast 9595449a,
 # src/toast/ops/sim_ground.py (sha256 eff1ac3ad41a9095670ba5357903581a4da01b1c6a75c37f8f236aef2cf2c4df).
 
 import copy
+import hashlib
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import traitlets
 from astropy import units as u
+from astropy.coordinates import EarthLocation
 from astropy.table import QTable
 from scipy.constants import degree
 
@@ -20,7 +24,7 @@ from toast import qarray as qa
 from toast.coordinates import azel_to_radec
 from toast.dist import distribute_discrete, distribute_uniform
 from toast.healpix import ang2vec
-from toast.instrument import Focalplane, Session, Telescope
+from toast.instrument import Focalplane, GroundSite, Session, Telescope
 from toast.intervals import IntervalList, regular_intervals
 from toast.io import load_instrument_file
 from toast.noise_sim import AnalyticNoise
@@ -61,10 +65,21 @@ from toast.ops.sim_ground_utils import (
 )
 from toast.ops.sim_hwp import simulate_hwp_response
 
+from .trajectory_h5 import (
+    _TRAJECTORY_FIELDS,
+    _TRAJECTORY_INFO_KEY,
+    _check_sample_rate,
+    _load_trajectory_block,
+)
+
 
 @trait_docs
 class SimFYST(Operator):
     """Simulate a generic ground-based telescope scanning.
+
+    With trajectory_file, use one native block and the caller's Telescope to build
+    time / geometry only. Shared flags and scan intervals are not yet derived.
+    Without trajectory_file, the original schedule-based CES behavior follows.
 
     This simulates ground-based pointing in constant elevation scans for a telescope
     located at a particular site and using an pre-created schedule.
@@ -83,6 +98,16 @@ class SimFYST(Operator):
     # Class traits
 
     API = Int(0, help="Internal interface version for this operator")
+
+    trajectory_file = Unicode(
+        None, allow_none=True, help="One native trajectory block in a writer HDF5 file"
+    )
+
+    trajectory_boresight_angle = Quantity(
+        None,
+        allow_none=True,
+        help="Fixed trajectory roll; None uses the source trajectory_info roll_deg",
+    )
 
     telescope = Instance(
         klass=Telescope, allow_none=True, help="This must be an instance of a Telescope"
@@ -466,6 +491,9 @@ class SimFYST(Operator):
 
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
+        if self.trajectory_file is not None:
+            return self._exec_trajectory(data, detectors=detectors)
+
         log = Logger.get()
 
         # Data distribution in the detector and sample directions
@@ -1239,6 +1267,220 @@ class SimFYST(Operator):
             )
         return obs_tele
 
+    def _trajectory_shared_names(self):
+        """Map native inputs / derived geometry to configured output names."""
+        return {
+            key: getattr(self, key)
+            for key in (
+                *_TRAJECTORY_FIELDS[:3],
+                "boresight_azel",
+                "boresight_radec",
+                "position",
+                "velocity",
+            )
+        }
+
+    def _validate_trajectory_config(self, data, detectors):
+        """Reject unsupported settings before loading or allocating an observation."""
+        if self.schedule is not None or self.schedule_file is not None:
+            raise ValueError(
+                "trajectory_file is mutually exclusive with schedule/schedule_file"
+            )
+        if self.telescope_file is not None:
+            raise ValueError(
+                "trajectory mode does not support telescope_file; pass a Telescope"
+            )
+        if self.telescope is None:
+            raise ValueError("trajectory mode requires the caller's Telescope")
+        if not self.telescope.focalplane.detectors:
+            raise ValueError("trajectory mode requires a non-empty caller focalplane")
+        if not isinstance(self.telescope.site, GroundSite):
+            raise TypeError("trajectory mode requires a caller GroundSite")
+        if data.obs:
+            raise ValueError("trajectory mode requires empty data.obs")
+        comm = data.comm
+        if (
+            comm.comm_world is not None
+            or comm.comm_group is not None
+            or comm.world_size != 1
+            or comm.group_size != 1
+            or comm.ngroups != 1
+        ):
+            raise ValueError(
+                "trajectory mode requires serial execution: no MPI, world/group size 1"
+            )
+        if detectors is not None:
+            raise ValueError(
+                "trajectory mode does not support detector filtering (detectors)"
+            )
+        if self.telescope.site.weather is not None:
+            raise ValueError("trajectory mode does not support caller site weather")
+
+        # Even inactive, non-default motion settings would misleadingly imply that
+        # they affect the supplied samples. Defaults never generate new motion here.
+        unsupported = (
+            "distribute_time",
+            "detset_key",
+            "session_split_key",
+            "weather",
+            "max_pwv",
+            "median_weather",
+            "hwp_angle",
+            "hwp_rpm",
+            "hwp_step",
+            "hwp_step_time",
+            "elnod_start",
+            "elnod_end",
+            "elnod_every_scan",
+            "elnods",
+            "el_mod_step",
+            "el_mod_rate",
+            "el_mod_amplitude",
+            "el_mod_sine",
+            "el_mod_sine_phase",
+            "randomize_phase",
+            "track_azimuth",
+            "scan_cosecant_modulation",
+            "fix_rate_on_sky",
+            "scan_rate_az",
+            "scan_rate_el",
+            "scan_accel_az",
+            "scan_accel_el",
+        )
+        for key in unsupported:
+            if getattr(self, key) != self.trait_defaults(key):
+                raise ValueError(f"trajectory mode does not support non-default {key}")
+
+        names = self._trajectory_shared_names()
+        if len(set(names.values())) != len(names):
+            raise ValueError("trajectory shared output names must be distinct")
+        for native, output in names.items():
+            if not output or (output in _TRAJECTORY_FIELDS and output != native):
+                raise ValueError(
+                    f"trajectory output {native}={output!r} conflicts with original fields"
+                )
+        if self.det_data is not None and self.det_data == self.det_flags:
+            raise ValueError("det_data and det_flags must have distinct names")
+
+    def _exec_trajectory(self, data, detectors=None):
+        """Build time / geometry from one block, using only the caller's instrument."""
+        self._validate_trajectory_config(data, detectors)
+        source = Path(self.trajectory_file).expanduser().resolve()
+        block = _load_trajectory_block(source)
+        telescope = self.telescope
+        site = telescope.site
+        source_location = EarthLocation.from_geodetic(**block.source_site)
+        distance_m = np.linalg.norm(
+            [
+                (a - b).to_value(u.m)
+                for a, b in zip(site.earthloc.geocentric, source_location.geocentric)
+            ]
+        )
+        if not np.isfinite(distance_m) or distance_m > 1e-3:
+            raise ValueError(
+                f"Caller site must match source site within 1 mm; distance={distance_m:.9g} m"
+            )
+        rate_check = _check_sample_rate(
+            telescope.focalplane.sample_rate.to_value(u.Hz),
+            block.actual_rate_hz,
+            rtol=1e-6,
+        )
+        if self.trajectory_boresight_angle is None:
+            roll_source = "trajectory_info.roll_deg"
+            try:
+                roll = float(block.trajectory_info["roll_deg"]) * u.deg
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    "trajectory_info.roll_deg must be a finite scalar angle"
+                ) from error
+        else:
+            roll_source = "trajectory_boresight_angle"
+            roll = self.trajectory_boresight_angle
+        roll_rad = roll.to_value(u.rad)
+        if np.ndim(roll_rad) != 0 or not np.isfinite(roll_rad):
+            raise ValueError(f"{roll_source} must be a finite scalar angle")
+
+        times, az, el = (block.arrays[key] for key in _TRAJECTORY_FIELDS[:3])
+        position, velocity = site.position_velocity(times)
+        bore_azel = qa.from_lonlat_angles(-az, el, np.zeros_like(el))
+        if roll_rad != 0:
+            bore_azel = qa.mult(bore_azel, qa.rotation(np.array([0, 0, 1.0]), roll_rad))
+        backend = {
+            "use_ephem": self.use_ephem,
+            "use_qpoint": self.use_qpoint,
+            "so3g_compat_mode": self.so3g_compat_mode,
+        }
+        bore_radec = azel_to_radec(site, times, bore_azel, **backend)
+        name = block.observation_name
+        session = Session(
+            name,
+            uid=name_UID(name),
+            start=datetime.fromtimestamp(times[0], tz=timezone.utc),
+            end=datetime.fromtimestamp(times[-1], tz=timezone.utc),
+        )
+        info = {
+            "contract_version": "B2.2",
+            "source_file": source.name,
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "samples": len(times),
+            "first_time_unix_s": float(times[0]),
+            "last_time_unix_s": float(times[-1]),
+            "rate_check": rate_check,
+            "max_phase_residual_s": block.max_phase_residual_s,
+            "time_tolerance_s": block.time_tolerance_s,
+            "roll_deg": float(roll.to_value(u.deg)),
+            "roll_source": roll_source,
+            "caller_telescope": telescope.name,
+            "caller_site": site.name,
+            "coordinate_backend": backend,
+            "flags/intervals": "not yet derived (B2.3)",
+        }
+        ob = Observation(
+            data.comm,
+            telescope,
+            len(times),
+            name=name,
+            uid=name_UID(name),
+            session=session,
+            process_rows=1,
+            sample_sets=[[len(times)]],
+        )
+        try:
+            # Keep all native names as well as any configured time / Az / El aliases.
+            geometry = dict(
+                zip(
+                    ("boresight_azel", "boresight_radec", "position", "velocity"),
+                    (bore_azel, bore_radec, position, velocity),
+                )
+            )
+            values = {**block.arrays, **geometry}
+            arrays = dict(block.arrays)
+            arrays.update(
+                {
+                    output: values[key]
+                    for key, output in self._trajectory_shared_names().items()
+                }
+            )
+            for key, array in arrays.items():
+                ob.shared.create_column(key, shape=array.shape, dtype=array.dtype)
+                ob.shared[key].set(array, offset=(0,) * array.ndim, fromrank=0)
+            if self.det_data is not None:
+                ob.detdata.ensure(
+                    self.det_data, dtype=np.float64, create_units=self.det_data_units
+                )
+            if self.det_flags is not None:
+                ob.detdata.ensure(self.det_flags, dtype=np.uint8)
+            ob[_TRAJECTORY_INFO_KEY] = block.trajectory_info_json
+            ob["source_shared_array_sha256"] = json.dumps(
+                block.source_shared_array_sha256
+            )
+            ob["simfyst_info"] = json.dumps(info, sort_keys=True, allow_nan=False)
+        except Exception:
+            ob.clear()
+            raise
+        # No partially constructed observation is ever exposed to the caller.
+        data.obs.append(ob)
+
     def _finalize(self, data, **kwargs):
         return
 
@@ -1246,6 +1488,21 @@ class SimFYST(Operator):
         return dict()
 
     def _provides(self):
+        if self.trajectory_file is not None:
+            return {
+                "shared": list(
+                    dict.fromkeys(
+                        [
+                            *_TRAJECTORY_FIELDS,
+                            *self._trajectory_shared_names().values(),
+                        ]
+                    )
+                ),
+                "detdata": [
+                    key for key in (self.det_data, self.det_flags) if key is not None
+                ],
+                "intervals": [],
+            }
         prov = {
             "shared": [
                 self.times,
