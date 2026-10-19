@@ -18,7 +18,7 @@ fyst_toast/
 ├── examples/
 │   ├── 01_ces_baseline.py          # SimGround 与 SimFYST 的小规模行为对照
 │   └── 02_save_trajectory.py       # 复用已有 writer；ECSV → TOAST Observation H5
-├── tests/check_writer_roundtrip.py # 原生 LoadHDF5 读回，与输入数组逐点比较
+├── tools/check_writer_roundtrip.py # 原生 LoadHDF5 读回，与输入数组逐点比较
 ├── docs/
 │   ├── architecture.md            # 数据流、字段与各层职责
 │   ├── validation.md              # 已运行的检查与已知限制
@@ -126,7 +126,7 @@ intervals。它还不是正式 FYST 仪器模型或完整 sky / noise simulation
 ## 3. 用原生 TOAST 读回核对
 
 ```bash
-python tests/check_writer_roundtrip.py /path/to/fyst_trajectory.ecsv output/ces/hdf5
+python tools/check_writer_roundtrip.py /path/to/fyst_trajectory.ecsv output/ces/hdf5
 ```
 
 此检查调用原生 `LoadHDF5`，验证每个 block、全部 17 个 shared arrays 的存储 hash，

@@ -56,7 +56,7 @@ python examples/02_save_trajectory.py \
   ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all
 
-python tests/check_writer_roundtrip.py \
+python tools/check_writer_roundtrip.py \
   ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   output/ces/hdf5
 ```

@@ -53,7 +53,7 @@ arrays 可以承载其他 patterns。writer 已保存的 TOAST H5 可以提供�
 | `src/fyst_toast/trajectory_input.py` | 私有单 block loader：复用 `LoadHDF5`，校验并原样复制 12 个轨迹数组、来源 metadata / site，检查均匀时钟及 nominal rate（默认 `rtol=1e-6`） | B2.1 独立入口；`SimFYST` 尚未使用，见 [学习笔记](steps/01-load-trajectory-block.md) |
 | `src/fyst_toast/sim_fyst.py` | 建立供后续 operators 使用的 Data / Observations | 仍是复制的 CES baseline |
 | TOAST dependency | Data、Observation、Telescope、坐标变换、Save/LoadHDF5 等 | 通过正常 imports 复用 |
-| `tests/check_writer_roundtrip.py` | 用原生 loader 检查存取和输入保真 | 验收工具，不是新的科学 reader |
+| `tools/check_writer_roundtrip.py` | 用原生 loader 检查存取和输入保真 | 验收工具，不是新的科学 reader |
 
 writer 暂时保留为独立脚本，方便逐段阅读：它仍包含教学用 focalplane、roll 与 flag 策略。
 正式 package 接口在单 block 接入时再确定。
