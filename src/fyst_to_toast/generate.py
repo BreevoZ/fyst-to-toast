@@ -16,7 +16,12 @@ from pathlib import Path
 from fyst_to_toast import trajectory_h5 as schema
 
 DEFAULT_DURATION_S = 10800
-DEFAULT_START = {"ces": "2026-08-02T01:25:00", "daisy": "2026-03-15T04:00:00"}
+DEFAULT_START = {
+    "ces": "2026-08-02T01:25:00",
+    "daisy": "2026-03-15T04:00:00",
+    # FYST docs/trajectory_examples.rst:143 (f095c51).
+    "pong": "2026-03-15T01:00:00",
+}
 OUTPUT_NAMES = (
     "full_timeline.ecsv",
     "schedule.ecsv",
@@ -31,7 +36,7 @@ def sha256(path):
 
 
 def build_legacy_patch(case):
-    """Build the unchanged legacy CES or Daisy ObservingPatch."""
+    """Build legacy CES / Daisy or FYST's documented Pong as an ObservingPatch."""
     from fyst_trajectories.overhead import ObservingPatch
 
     if case not in DEFAULT_START:
@@ -48,7 +53,7 @@ def build_legacy_patch(case):
             elevation=50,
             scan_params={"timestep": 0.1, "az_accel": 1.0},
         )
-    else:
+    elif case == "daisy":
         patch = ObservingPatch(
             name="native Daisy",
             ra_center=180,
@@ -58,6 +63,24 @@ def build_legacy_patch(case):
             scan_type="daisy",
             velocity=0.3,
             scan_params={"radius": 1, "turn_radius": 0.3, "timestep": 0.1},
+        )
+    else:
+        # Field and pattern: FYST docs/trajectory_examples.rst:145-160 (f095c51).
+        # Native period is 240 s, within the default 3600 - 300 s subscan budget.
+        patch = ObservingPatch(
+            name="native Pong",
+            ra_center=180,
+            dec_center=-30,
+            width=2,
+            height=2,
+            scan_type="pong",
+            velocity=0.4,
+            scan_params={
+                "spacing": 0.1,
+                "num_terms": 4,
+                "angle": 0.0,
+                "timestep": 0.1,
+            },
         )
     return patch
 

@@ -27,7 +27,7 @@ from fyst_to_toast.generate import (
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("case", choices=["ces", "daisy"])
+    parser.add_argument("case", choices=["ces", "daisy", "pong"])
     parser.add_argument(
         "--start", help="UTC ISO 时间；省略时使用该 case 的 legacy 日期"
     )

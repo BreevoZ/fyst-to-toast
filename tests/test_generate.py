@@ -25,7 +25,9 @@ from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.generate import generate_trajectory
 
 
-def test_ces_ecsv_writer_contract(tmp_path):
+# Pong's documented night includes an initial planet calibration before science.
+@pytest.mark.parametrize("case,duration_s", [("ces", 1800), ("pong", 2400)])
+def test_ecsv_writer_contract(tmp_path, case, duration_s):
     iers_path = os.environ.get("FYST_TO_TOAST_TEST_IERS")
     with iers.conf.set_temp("auto_download", False):
         table = iers.IERS_A.open(iers_path) if iers_path else iers.IERS_Auto.open()
@@ -34,11 +36,12 @@ def test_ces_ecsv_writer_contract(tmp_path):
             solar_system_ephemeris.set("builtin"),
         ):
             report = generate_trajectory(
-                "ces", tmp_path, duration_s=1800, iers_file=iers_path
+                case, tmp_path, duration_s=duration_s, iers_file=iers_path
             )
             assert report["status"] == "complete"
             source = tmp_path / "fyst_trajectory.ecsv"
             samples = QTable.read(source)
+            assert samples.meta[schema.ECSV_CASE] == case
             assert tuple(samples.colnames) == schema.TRAJECTORY_COLUMNS
             assert set(samples.meta) == set(schema.TRAJECTORY_META_KEYS)
             blocks = samples.meta[schema.ECSV_BLOCKS]
@@ -47,7 +50,10 @@ def test_ces_ecsv_writer_contract(tmp_path):
                 assert set(block) == set(schema.TRAJECTORY_BLOCK_KEYS)
             assert len(samples) == report["total_science_samples"] > 0
 
-            site = QTable.read(tmp_path / "schedule.ecsv").meta
+            schedule = QTable.read(tmp_path / "schedule.ecsv")
+            if case == "pong":
+                assert set(schedule["scan_type"]) == {"pong"}
+            site = schedule.meta
             folder = tmp_path / "hdf5"
             folder.mkdir()
             files = schema.write_trajectory_blocks(

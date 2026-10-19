@@ -56,7 +56,9 @@ python tools/check_writer_roundtrip.py "$RUN_DIR/fyst_trajectory.ecsv" "$RUN_DIR
 `fyst_trajectory.ecsv` 和 `report.json`。writer 默认读取同目录的 schedule，核对其
 SHA-256，每 native block 写一个 H5；`files.json` 列出本轮文件，
 `writer_report.json` 记录写入设置。roundtrip 才验证原生 `LoadHDF5` 读回结果。
-改为 `daisy` 并另选目录可运行 Daisy；已有输出默认拒绝覆盖。
+改为 `daisy` 或 `pong` 并另选目录可运行 Daisy / Pong（Pong 参数取自 FYST
+`docs/trajectory_examples.rst` 的示例：RA/Dec 180°/−30°，2°×2°，0.4°/s，周期 240 s）；
+已有输出默认拒绝覆盖。
 完整参数见 `--help`，交互查看方式见 [tools](tools/README.md)。
 
 独立 loader 的最小调用（`SimFYST` 的 trajectory 分支也复用此接口）：
