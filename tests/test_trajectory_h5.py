@@ -18,9 +18,15 @@ import h5py
 import numpy as np
 import pytest
 from astropy import units as u
+from astropy.coordinates import solar_system_ephemeris
+from astropy.table import QTable
 from astropy.utils import iers
 
-from fyst_toast.trajectory_input import _check_sample_rate, _load_trajectory_block
+from fyst_toast.trajectory_h5 import (
+    _check_sample_rate,
+    _load_trajectory_block,
+    write_trajectory_blocks,
+)
 
 iers.conf.auto_download = False
 
@@ -155,6 +161,65 @@ def assert_original_arrays_and_metadata(path):
 
 def test_committed_arrays_and_metadata(sample_path):
     assert_original_arrays_and_metadata(sample_path)
+
+
+def test_committed_write_load_roundtrip(sample_path, tmp_path):
+    """Rebuild writer input from committed original arrays, without local ECSV."""
+    original = _load_trajectory_block(sample_path)
+    arrays, info = original.arrays, original.trajectory_info
+    samples = QTable()
+    # Use original degrees, not a lossy inverse conversion from stored radians.
+    for column, field, unit in (
+        ("timestamp_unix_s", "times", u.s),
+        ("time_s", "fyst_time_s", u.s),
+        ("block_time_s", "fyst_block_time_s", u.s),
+        ("az_deg", "fyst_az_deg", u.deg),
+        ("el_deg", "fyst_el_deg", u.deg),
+        ("az_velocity", "fyst_az_velocity_deg_s", u.deg / u.s),
+        ("el_velocity", "fyst_el_velocity_deg_s", u.deg / u.s),
+    ):
+        samples[column] = arrays[field] * unit
+    for column, field in (
+        ("scan_flag", "fyst_scan_flag"),
+        ("scan_index", "scan_index"),
+        ("subscan_index", "subscan_index"),
+    ):
+        samples[column] = arrays[field]
+    # The fixture contains one block, so only the table slice becomes local.
+    block = {**info["block"], "first": 0, "last": len(samples)}
+    samples.meta.update(case=info["case"], start_utc=info["start_utc"], blocks=[block])
+    with h5py.File(sample_path, "r") as saved:
+        site_name = saved["instrument"].attrs["site_name"]
+    # Bundled offline IERS suffices for this input-array / manifest test. Pointing
+    # is recomputed; full-file identity uses the original ECSV + IERS separately.
+    with solar_system_ephemeris.set("builtin"):
+        files = write_trajectory_blocks(
+            samples,
+            site_name=site_name,
+            latitude_deg=original.source_site["lat"].to_value(u.deg),
+            longitude_deg=original.source_site["lon"].to_value(u.deg),
+            height_m=original.source_site["height"].to_value(u.m),
+            output_dir=tmp_path,
+            source_sha256=info["source_sha256"],
+            roll_deg=info["roll_deg"],
+        )
+    assert files == [sample_path.name]
+    path = tmp_path / files[0]
+    loaded = _load_trajectory_block(path)
+    assert loaded.observation_name == original.observation_name
+    assert loaded.trajectory_info == {**info, "block": block}
+    assert set(loaded.arrays) == set(FIELDS)
+    for key in FIELDS:
+        assert loaded.arrays[key].dtype == arrays[key].dtype, key
+        assert loaded.arrays[key].shape == arrays[key].shape, key
+        assert loaded.arrays[key].tobytes() == arrays[key].tobytes(), key
+    with h5py.File(path, "r") as saved:
+        manifest = loaded.source_shared_array_sha256
+        assert manifest is not None
+        assert len(manifest) == 17
+        assert set(manifest) == set(saved["shared"])
+        for key, dataset in saved["shared"].items():
+            assert hashlib.sha256(dataset[()].tobytes()).hexdigest() == manifest[key]
 
 
 @pytest.mark.parametrize("relative", CES_FILES + DAISY_FILES)

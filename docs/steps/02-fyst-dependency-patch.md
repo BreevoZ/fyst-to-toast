@@ -77,7 +77,7 @@ hash 为 `32d9041d1af683579152f1ed7f7c4a86c92d110dc932c30cf4fbf356124458d3`。
 ```bash
 R2_INPUT=../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output
 for case in ces daisy; do
-  python examples/02_save_trajectory.py "$R2_INPUT/$case/fyst_trajectory.ecsv" \
+  python scripts/save_trajectory_h5.py "$R2_INPUT/$case/fyst_trajectory.ecsv" \
     --schedule "$R2_INPUT/$case/schedule.ecsv" \
     --iers-file ../fyst-trajectories/tests/data/finals2000A.all \
     --output-dir "$R2_OUTPUT/$case/hdf5"

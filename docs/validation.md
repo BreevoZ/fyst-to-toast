@@ -78,7 +78,7 @@ fields 和关键 Observation / Session 信息完全一致。代码 AST 对照也
 输入已从旧 `../fyst-trajectories/examples/...` 移至下列归档路径；命令使用独立 R2 输出目录，原输出保留。
 
 ```bash
-python examples/02_save_trajectory.py \
+python scripts/save_trajectory_h5.py \
   ../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all \
   --output-dir output/codex/R2_fyst_dependency/ces/hdf5

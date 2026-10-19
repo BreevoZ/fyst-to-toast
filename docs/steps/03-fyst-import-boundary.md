@@ -20,7 +20,7 @@ SimFYST** 依赖文件约定。可选 contract test 仍 import FYST，用来检�
 | 文件与行号 | 改动 |
 |---|---|
 | `src/fyst_toast/fyst_flags.py:1` | 新增四个 plain-int enum：UNCLASSIFIED=0、SCIENCE=1、TURNAROUND=2、RETUNE=3；docstring 记录源文件、80–83 行及完整 `f095c51` commit |
-| `examples/02_save_trajectory.py:18,100,158` | 小 helper 用 Astropy `Table.read(..., format="ascii.ecsv").meta` 读 site；使用本地 flags，再按原单位构造 GroundSite |
+| `scripts/save_trajectory_h5.py:18,100,158` | 小 helper 用 Astropy `Table.read(..., format="ascii.ecsv").meta` 读 site；使用本地 flags，再按原单位构造 GroundSite |
 | `tools/check_writer_roundtrip.py:57` | flags 改从 `fyst_toast.fyst_flags` 导入 |
 | `tests/test_fyst_contract.py:19,47,56` | `importorskip`、四项 enum 对照、CES/Daisy 两项 site 精确对照 |
 | `pyproject.toml:21` | `writer` extra 改名 `fyst`，保留 `>=0.10,<0.11` pin 和 UTC patch 注释；仅供未来 generation 和 contract test |

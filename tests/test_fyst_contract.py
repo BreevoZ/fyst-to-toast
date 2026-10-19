@@ -62,7 +62,7 @@ def test_legacy_site_contract(case):
             f"Legacy schedule absent: {schedule}; "
             "set FYST_TOAST_TEST_SCHEDULE_ROOT to supply it"
         )
-    read_site_metadata = runpy.run_path(str(REPO / "examples/02_save_trajectory.py"))[
+    read_site_metadata = runpy.run_path(str(REPO / "scripts/save_trajectory_h5.py"))[
         "read_site_metadata"
     ]
     native = read_timeline(schedule).site

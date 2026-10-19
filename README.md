@@ -14,10 +14,12 @@ writer 已能保存原生 TOAST Observation HDF5，但它独立于 `SimFYST`。
 fyst_toast/
 ├── src/fyst_toast/
 │   ├── __init__.py                 # 版本；不会主动 import TOAST / MPI
+│   ├── trajectory_h5.py           # trajectory H5 writer / loader
 │   └── sim_fyst.py                 # 当前 CES baseline；未来的轨迹输入 operator
 ├── examples/
-│   ├── 01_ces_baseline.py          # SimGround 与 SimFYST 的小规模行为对照
-│   └── 02_save_trajectory.py       # 复用已有 writer；ECSV → TOAST Observation H5
+│   └── 01_ces_baseline.py          # SimGround 与 SimFYST 的小规模行为对照
+├── scripts/
+│   └── save_trajectory_h5.py       # 复用已有 writer；ECSV → TOAST Observation H5
 ├── tools/check_writer_roundtrip.py # 原生 LoadHDF5 读回，与输入数组逐点比较
 ├── docs/
 │   ├── architecture.md            # 数据流、字段与各层职责
@@ -88,7 +90,7 @@ sim.apply(data)  # 新建的空 TOAST Data；需要先设置好运行环境
 不是任意 ECSV，也不是 TOAST v5 schedule。具体字段见 [输入约定](docs/architecture.md#输入约定)。
 
 ```bash
-python examples/02_save_trajectory.py /path/to/fyst_trajectory.ecsv \
+python scripts/save_trajectory_h5.py /path/to/fyst_trajectory.ecsv \
   --schedule /path/to/schedule.ecsv \
   --output-dir output/ces/hdf5
 ```
@@ -100,7 +102,7 @@ CES 和 Daisy 使用同一个脚本，切换输入即可，不需要改变 write
 在当前研究 workspace 中，例如：
 
 ```bash
-python examples/02_save_trajectory.py \
+python scripts/save_trajectory_h5.py \
   ../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all
 ```

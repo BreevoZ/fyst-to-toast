@@ -5,7 +5,7 @@ src/fyst_toast/sim_fyst.py is adapted from TOAST's SimGround operator.
 The TOAST BSD-2-Clause license and author list are retained in LICENSE
 and AUTHORS. UPSTREAM.json records the source commit and file hash.
 
-examples/02_save_trajectory.py is adapted from the local working-tree example
+scripts/save_trajectory_h5.py is adapted from the local working-tree example
 fyst-trajectories/examples/fyst_to_toast/hdf5/03_save_trajectory.py.
 That example was untracked in the source repository when copied; it is not
 represented as a published upstream contribution. UPSTREAM.json records

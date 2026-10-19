@@ -11,16 +11,16 @@
 
 ## 改了什么
 
-新增私有模块 `src/fyst_toast/trajectory_input.py`，没有从 package 顶层导出 API：
+新增私有模块 `src/fyst_toast/trajectory_h5.py`，没有从 package 顶层导出 API：
 
 | 位置 | 职责 |
 |---|---|
-| `src/fyst_toast/trajectory_input.py:38`，`_TrajectoryBlock` | 小型 frozen dataclass，保存数组副本、Observation name、解析后的 `trajectory_info` 及原 JSON、source hash manifest、site quantities 和时钟统计 |
-| `src/fyst_toast/trajectory_input.py:57`，`_load_trajectory_block(path)` | 延迟 import TOAST；以 `files=[path], detdata=[], force_serial=True` 读临时 `Data`；验证后 `np.copy` 所需数组，始终在 `finally` 中 `clear()` |
-| `src/fyst_toast/trajectory_input.py:151`，`_validate_clock(times)` | 在结构及 finite 检查后，检查严格递增和均匀时钟，返回 actual rate、最大 phase residual 和时间容差 |
-| `src/fyst_toast/trajectory_input.py:171`，`_check_sample_rate(nominal_rate_hz, actual_rate_hz, rtol=1e-6)` | 独立比较两个 Hz 数值；不匹配抛 `ValueError`，通过则返回含两种 rate、relative error 和 rtol 的 dict，供调用者记录 metadata |
+| `src/fyst_toast/trajectory_h5.py:45`，`_TrajectoryBlock` | 小型 frozen dataclass，保存数组副本、Observation name、解析后的 `trajectory_info` 及原 JSON、source hash manifest、site quantities 和时钟统计 |
+| `src/fyst_toast/trajectory_h5.py:64`，`_load_trajectory_block(path)` | 延迟 import TOAST；以 `files=[path], detdata=[], force_serial=True` 读临时 `Data`；验证后 `np.copy` 所需数组，始终在 `finally` 中 `clear()` |
+| `src/fyst_toast/trajectory_h5.py:158`，`_validate_clock(times)` | 在结构及 finite 检查后，检查严格递增和均匀时钟，返回 actual rate、最大 phase residual 和时间容差 |
+| `src/fyst_toast/trajectory_h5.py:178`，`_check_sample_rate(nominal_rate_hz, actual_rate_hz, rtol=1e-6)` | 独立比较两个 Hz 数值；不匹配抛 `ValueError`，通过则返回含两种 rate、relative error 和 rtol 的 dict，供调用者记录 metadata |
 
-另新增 `tests/test_trajectory_input.py`，并在 `docs/architecture.md` 增加一行模块说明。
+另新增 `tests/test_trajectory_h5.py`，并在 `docs/architecture.md` 增加一行模块说明。
 `frozen` 只禁止替换 dataclass 属性；其中 arrays / dicts 仍可编辑，但已经独立于临时
 TOAST 内存。返回的 `source_site` 只有 `lat` / `lon` / `height` Astropy quantities，
 没有文件中的 Telescope 或示意 focalplane。
@@ -30,7 +30,7 @@ TOAST 内存。返回的 `source_site` 只有 `lat` / `lon` / `height` Astropy q
 现在可以独立读取一个 writer H5，得到已经验证的原始轨迹，供 B2.2 接入使用：
 
 ```python
-from fyst_toast.trajectory_input import _check_sample_rate, _load_trajectory_block
+from fyst_toast.trajectory_h5 import _check_sample_rate, _load_trajectory_block
 
 block = _load_trajectory_block("output/ces/hdf5/fyst_ces_000_000.h5")
 times = block.arrays["times"]  # 原始 Unix seconds；不是重新生成的时间轴
@@ -75,12 +75,12 @@ mkdir -p "$AUDIT"
 export MPLCONFIGDIR="$AUDIT/cache/matplotlib"
 export XDG_CACHE_HOME="$AUDIT/cache" NUMBA_CACHE_DIR="$AUDIT/cache/numba"
 
-python -m pytest tests/test_trajectory_input.py -q -s -p no:cacheprovider \
+python -m pytest tests/test_trajectory_h5.py -q -s -p no:cacheprovider \
   --basetemp="$AUDIT/pytest_tmp"
 python examples/01_ces_baseline.py
 (cd /tmp && python -c "import fyst_toast, sys; assert 'toast' not in sys.modules")
-python -m ruff check src/fyst_toast/trajectory_input.py tests/test_trajectory_input.py
-python -m ruff format --check src/fyst_toast/trajectory_input.py tests/test_trajectory_input.py
+python -m ruff check src/fyst_toast/trajectory_h5.py tests/test_trajectory_h5.py
+python -m ruff format --check src/fyst_toast/trajectory_h5.py tests/test_trajectory_h5.py
 git diff --check
 ```
 

@@ -15,7 +15,7 @@
     "workspace_relative_path": "fyst-trajectories/examples/fyst_to_toast/hdf5/03_save_trajectory.py",
     "copied_on": "2026-10-18",
     "sha256": "ca2c9b3eaae197e3e8e8929e91cb745f236bc30573f2e9b50e71276ad8a6f61f",
-    "destination": "examples/02_save_trajectory.py",
+    "destination": "scripts/save_trajectory_h5.py",
     "changes": [
       "Explicit trajectory / schedule / output / IERS paths; no sibling-repository imports",
       "Read pattern name from input metadata; preserve native block partition",

@@ -54,7 +54,7 @@ fyst_daisy_003_000.h5
 
 生成过程依据 [validation.md](../docs/validation.md) 的记录：原生 FYST scheduler /
 trajectory generator → 旧本地 example 的 `fyst_trajectory.ecsv` 与 `schedule.ecsv`
-→ 本 repo 的 `examples/02_save_trajectory.py` → `output/<case>/hdf5/` → 本目录副本。
+→ 本 repo 的 `scripts/save_trajectory_h5.py` → `output/<case>/hdf5/` → 本目录副本。
 
 历史输入产生于升级前的 **FYST trajectories 0.8.0 working tree + 本地 UTC patch**，
 base commit 为 `2d0a3d395486fd4a43d83c8b38138e9b7bb6159b`；不是未修改的 release，
@@ -69,11 +69,11 @@ working-tree example，并非 FYST upstream 已提交文件；原有 license / a
 迁移后输入位于 `../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/{ces,daisy}/`；R2 的复跑与旧输出比较见 [学习笔记](../docs/steps/02-fyst-dependency-patch.md)。
 
 ```bash
-python examples/02_save_trajectory.py \
+python scripts/save_trajectory_h5.py \
   ../fyst-trajectories/examples/fyst_to_toast/output/ces/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all
 
-python examples/02_save_trajectory.py \
+python scripts/save_trajectory_h5.py \
   ../fyst-trajectories/examples/fyst_to_toast/output/daisy/fyst_trajectory.ecsv \
   --iers-file ../fyst-trajectories/tests/data/finals2000A.all
 ```

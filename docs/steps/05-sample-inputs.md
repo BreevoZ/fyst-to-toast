@@ -15,7 +15,7 @@ writer，也能执行核心 loader 检查。
 - [data/README.md](../../data/README.md)：记录用途、精确大小、hash、时间范围、
   来源命令和历史依赖。实测大小为 533,001 / 103,075 bytes，与原提示的
   “524 KB / 104 KB”不同；其他指定特征吻合。H5 metadata 未发现绝对文件路径。
-- [tests/test_trajectory_input.py](../../tests/test_trajectory_input.py)：核心正例固定
+- [tests/test_trajectory_h5.py](../../tests/test_trajectory_h5.py)：核心正例固定
   从 `data/` 读，逐字段对照独立 h5py 读取的 dtype / shape / bytes；负例只修改
   `tmp_path` 下的副本。保留原 CES 首块时钟检查和四个 Daisy blocks，扩展可选
   array 检查到全部 7 个 `output/` H5。`FYST_TOAST_TEST_OUTPUT` 只控制可选输入；
@@ -55,13 +55,13 @@ AUDIT="$PWD/output/codex/R4_sample_inputs"
 export MPLCONFIGDIR="$AUDIT/cache/matplotlib"
 export XDG_CACHE_HOME="$AUDIT/cache" NUMBA_CACHE_DIR="$AUDIT/cache/numba"
 unset FYST_TOAST_TEST_OUTPUT
-python -m pytest tests/test_trajectory_input.py -q -s -rs -p no:cacheprovider
+python -m pytest tests/test_trajectory_h5.py -q -s -rs -p no:cacheprovider
 R4_EMPTY_OUTPUT="$(mktemp -d)"
 FYST_TOAST_TEST_OUTPUT="$R4_EMPTY_OUTPUT" \
-  python -m pytest tests/test_trajectory_input.py -q -s -rs -p no:cacheprovider
+  python -m pytest tests/test_trajectory_h5.py -q -s -rs -p no:cacheprovider
 rmdir "$R4_EMPTY_OUTPUT"
-python -m ruff check tests/test_trajectory_input.py
-python -m ruff format --check tests/test_trajectory_input.py
+python -m ruff check tests/test_trajectory_h5.py
+python -m ruff format --check tests/test_trajectory_h5.py
 git check-ignore -v data/fyst_ces_000_001.h5 data/fyst_daisy_003_000.h5
 python examples/01_ces_baseline.py
 ```
