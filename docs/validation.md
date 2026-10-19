@@ -136,7 +136,7 @@ Explicit IERS-A file (both cases)
 - 新 writer 和 roundtrip checker 通过 Ruff 检查；未为格式化而改写复制的 `SimFYST`。
 - 从 repo 外单独 `import fyst_toast`，确认没有导入 TOAST / MPI。
 - 使用以下离线命令构建 wheel 成功，并检查 wheel 内保留全部 license / authors / NOTICE、
-  正确 license expression 和 writer extra dependency：
+  正确 license expression 和 extra dependency（当时名为 `writer`，现名为 `fyst`）：
 
 ```bash
 python -m pip wheel --no-deps --no-build-isolation --no-index --no-cache-dir . \

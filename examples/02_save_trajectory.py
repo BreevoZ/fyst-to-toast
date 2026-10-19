@@ -15,6 +15,20 @@ from pathlib import Path
 from tempfile import gettempdir
 
 
+def read_site_metadata(schedule):
+    """Read name, latitude (deg), longitude (deg), height (m) without snapping."""
+    from astropy import units as u
+    from astropy.table import Table
+
+    meta = Table.read(schedule, format="ascii.ecsv").meta
+    return (
+        str(meta["site_name"]),
+        float(meta["site_lat"].to_value(u.deg)),
+        float(meta["site_lon"].to_value(u.deg)),
+        float(meta["site_alt"].to_value(u.m)),
+    )
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -75,8 +89,6 @@ def main():
     from astropy.coordinates import solar_system_ephemeris
     from astropy.table import QTable
     from astropy.utils import iers
-    from fyst_trajectories.overhead import read_timeline
-    from fyst_trajectories.trajectory import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
     from toast import Data, Observation, ops
     from toast import qarray as qa
     from toast.coordinates import azel_to_radec
@@ -84,6 +96,8 @@ def main():
     from toast.instrument_sim import fake_hexagon_focalplane
     from toast.mpi import Comm
     from toast.observation import default_values as defaults
+
+    from fyst_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
 
     iers.conf.auto_download = False
     iers.conf.iers_degraded_accuracy = "error"
@@ -140,13 +154,13 @@ def main():
         parser.error("输出不能覆盖输入文件")
     folder.mkdir(parents=True, exist_ok=True)
 
-    # 1. 站点来自原生 timeline。这里的五个 detectors 是 TOAST 自带的示意 focalplane。
-    fyst_site = read_timeline(schedule).site
+    # 1. 站点直接来自 ECSV header。这里的五个 detectors 是 TOAST 自带的示意 focalplane。
+    site_name, latitude, longitude, height = read_site_metadata(schedule)
     site = GroundSite(
-        fyst_site.name,
-        fyst_site.latitude * u.deg,
-        fyst_site.longitude * u.deg,
-        fyst_site.elevation * u.m,
+        site_name,
+        latitude * u.deg,
+        longitude * u.deg,
+        height * u.m,
     )
     data = Data(Comm(world=None))
     try:

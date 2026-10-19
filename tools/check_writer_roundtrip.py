@@ -49,11 +49,12 @@ def main():
     import numpy as np
     from astropy import units as u
     from astropy.table import QTable
-    from fyst_trajectories.trajectory import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
     from toast import Data, ops
     from toast import qarray as qa
     from toast.mpi import Comm
     from toast.observation import default_values as defaults
+
+    from fyst_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
 
     samples = QTable.read(source)
     blocks = samples.meta["blocks"]

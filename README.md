@@ -34,7 +34,7 @@ fyst_toast/
 
 ## 环境与安装
 
-需要 Python ≥ 3.10 和已安装的 TOAST。运行 writer 另需 FYST trajectories 0.10.x；
+需要 Python ≥ 3.10 和已安装的 TOAST。未来的轨迹生成脚本和 contract test 另需 FYST trajectories 0.10.x；
 TOAST 本身有编译依赖，不由这些 example 自动安装。本机验证使用已有的 `fyst` conda
 环境、TOAST 3.0.5 和 FYST trajectories 0.10.0（`f095c51` 加下述补丁），版本声明不等于
 整个范围均已测试。
@@ -54,8 +54,8 @@ python -m pip install --no-deps --no-build-isolation -e .
 ```
 
 这是复用本机依赖的 editable install，不会更新它们。若使用其他环境，激活该环境即可，
-环境名称不必叫 `fyst`。`pyproject.toml` 的 `writer` extra 声明额外的 FYST 依赖；
-上面的 `--no-deps` 命令要求它已经安装。
+环境名称不必叫 `fyst`。`pyproject.toml` 的 `fyst` extra 仅供未来的轨迹生成脚本和 contract test；
+writer 不需要它，上面的 `--no-deps` 命令要求所需依赖已经安装。
 
 串行 example 在 import 前关闭 MPI、限制数值线程，并关闭 IERS 自动下载；
 package 本身不修改这些进程设置。不要在已初始化 MPI 的 notebook kernel 中依靠
