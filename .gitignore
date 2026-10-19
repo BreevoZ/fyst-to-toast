@@ -27,3 +27,11 @@ outputs/
 !.env.example
 .claude/settings.local.json
 
+
+# Local-only: agent instructions, learning notes, dated records and provenance.
+# Kept on disk for local use, never pushed (user decision 2026-10-18).
+AGENTS.md
+CLAUDE.md
+docs/steps/
+docs/records/
+docs/UPSTREAM.json

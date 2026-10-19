@@ -1,6 +1,6 @@
 """把已有 FYST trajectory ECSV 写为 TOAST Observation HDF5。
 
-复制并整理自本地 FYST example；来源与 SHA-256 见 UPSTREAM.json。
+复制并整理自用户本地的 legacy FYST example（原文件 SHA-256 ca2c9b3e…，详见本地 docs/UPSTREAM.json）。
 保留原生 block、采样点、五个示意 detectors 和 TOAST SaveHDF5 schema。
 此脚本独立于 SimFYST；不生成新运动，也不实现 SimFYST 的 H5 reader。
 """

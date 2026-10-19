@@ -51,4 +51,4 @@ python tools/check_writer_roundtrip.py /path/to/fyst_trajectory.ecsv output/ces/
 ```
 
 从其他 cwd 运行时，给脚本和输入传绝对路径即可，无需修改 `sys.path`。
-本次迁移来源、具体核验例子与结果见 [R3 学习笔记](../docs/steps/04-data-readers.md)。
+本次迁移来源、具体核验例子与结果见 本地 R3 学习笔记 `docs/steps/04-data-readers.md`。

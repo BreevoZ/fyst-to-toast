@@ -1,6 +1,7 @@
 """Native FYST scheduling and per-sample ECSV generation.
 
-Ported from the local legacy examples documented in docs/steps/06-generate-with-fyst.md.
+Ported from the user's local legacy examples (examples/fyst_to_toast/01-02 of the
+old fyst-trajectories sandbox).
 Only this module imports FYST, lazily. Callers configure IERS / ephemeris and
 MPI / thread settings; importing the package never configures the process.
 """

@@ -1,9 +1,11 @@
 # Copyright (c) 2015-2025 by the parties listed in the AUTHORS file.
 # All rights reserved.  Use of this source code is governed by
 # a BSD-style license that can be found in the LICENSE file.
+# TOAST's LICENSE and AUTHORS for this file are in LICENSES/TOAST-BSD-2-Clause.txt and LICENSES/TOAST-AUTHORS.txt.
 
 # Stage 0: CES baseline copied from TOAST SimGround; no FYST trajectory reader yet.
-# Only the class name and imports have changed.  Source provenance: UPSTREAM.json.
+# Only the class name and imports have changed.  Source: hpc4cmb/toast 9595449a,
+# src/toast/ops/sim_ground.py (sha256 eff1ac3ad41a9095670ba5357903581a4da01b1c6a75c37f8f236aef2cf2c4df).
 
 import copy
 from datetime import datetime, timedelta, timezone

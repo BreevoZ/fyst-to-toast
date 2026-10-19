@@ -59,4 +59,4 @@ PY
 
 当前机器没有重新安装：env `fyst` 的静态 `.pth` 直接指向新 checkout 的 `src/`，同样
 读取 working tree。pip metadata 仍为 0.8.0，实际 `__version__` 为 0.10.0；应以上述
-导入路径和文件 hash 为准。验证结果见 [R2 学习笔记](../steps/02-fyst-dependency-patch.md)。
+导入路径和文件 hash 为准。验证结果见 本地 R2 学习笔记 `docs/steps/02-fyst-dependency-patch.md`。

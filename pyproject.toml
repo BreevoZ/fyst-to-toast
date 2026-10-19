@@ -8,8 +8,7 @@ version = "0.1.0.dev0"
 description = "Experimental FYST-to-TOAST adapter: CES baseline and trajectory HDF5 export"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "BSD-2-Clause AND BSD-3-Clause"
-license-files = ["LICENSE", "AUTHORS", "LICENSES/*.txt", "NOTICE"]
+license-files = ["LICENSES/*.txt"]
 dependencies = [
     "toast>=3.0.5,<4",
     "numpy",

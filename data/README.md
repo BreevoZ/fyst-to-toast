@@ -52,21 +52,21 @@ fyst_daisy_003_000.h5
 
 ## 来源链：历史生成记录与本次核对
 
-生成过程依据 [validation.md](../docs/validation.md) 的记录：原生 FYST scheduler /
+生成过程依据 本地历史快照 `docs/records/2026-10-18-validation.md` 的记录：原生 FYST scheduler /
 trajectory generator → 旧本地 example 的 `fyst_trajectory.ecsv` 与 `schedule.ecsv`
 → 本 repo 的 `scripts/save_trajectory_h5.py` → `output/<case>/hdf5/` → 本目录副本。
 
 历史输入产生于升级前的 **FYST trajectories 0.8.0 working tree + 本地 UTC patch**，
 base commit 为 `2d0a3d395486fd4a43d83c8b38138e9b7bb6159b`；不是未修改的 release，
 **本次没有用 v0.10 重新生成**。`_iso_utc` / `_read_time` 的本地补丁支持带 `+00:00`
-的时间文本。补丁和来源文件 hash 见 [UPSTREAM.json](../UPSTREAM.json) 与
+的时间文本。补丁和来源文件 hash 见 本地 `docs/UPSTREAM.json` 与
 [历史 UTC patch](../docs/patches/fyst-timeline-utc_2d0a3d3.patch)。当前 0.10.0 依赖使用
 [另一份补丁](../docs/patches/README.md)，不改变这些 fixtures 的历史来源。writer 源自旧本地
 working-tree example，并非 FYST upstream 已提交文件；原有 license / authors 记录
-见 [NOTICE](../NOTICE)、[AUTHORS](../AUTHORS) 和 [LICENSES](../LICENSES)。
+见 [第三方代码与许可](../README.md#第三方代码与许可) 和 [LICENSES](../LICENSES)。
 
 验证记录中的 writer 命令如下（从本 repo 根目录执行；这是 **R4 记录的历史命令，R4 未运行**）：
-迁移后输入位于 `../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/{ces,daisy}/`；R2 的复跑与旧输出比较见 [学习笔记](../docs/steps/02-fyst-dependency-patch.md)。
+迁移后输入位于 `../legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/{ces,daisy}/`；R2 的复跑与旧输出比较见 本地学习笔记 `docs/steps/02-fyst-dependency-patch.md`。
 
 ```bash
 python scripts/save_trajectory_h5.py \
@@ -95,7 +95,7 @@ legacy_repo/fyst-trajectories-sandbox-2026-10/examples/fyst_to_toast/output/dais
 `../fyst-trajectories/tests/data/finals2000A.all` 与它逐字节相同，可用于当前复跑。这些位置只说明
 历史输入现存位置，loader 测试不依赖 sibling checkout。
 
-下列 SHA-256 原载于 `docs/validation.md`；本次只读检查归档文件，全部吻合，
+下列 SHA-256 原载于现归档的 `docs/records/2026-10-18-validation.md`；本次只读检查归档文件，全部吻合，
 并与现有 `writer_report.json` 中的 source / schedule / IERS hashes 交叉核对：
 
 ```text
@@ -128,5 +128,5 @@ focalplane / Nasmyth 姿态。没有 detector signal 或扫描 interval lists；
 Pong、不规则采样、MPI、sky / atmosphere / noise simulation。当前 `SimFYST`
 仍为 `SimGround` 的 CES baseline，尚未接入 H5 loader。
 
-本次测试结果与重跑方法见 [R4 学习笔记](../docs/steps/05-sample-inputs.md)；原始日志
+本次测试结果与重跑方法见 本地 R4 学习笔记 `docs/steps/05-sample-inputs.md`；原始日志
 在忽略目录 `output/codex/R4_sample_inputs/`，不作为 fixture 一同提交。
