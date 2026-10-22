@@ -13,9 +13,9 @@ scanning / turnaround / fyst_invalid intervals。** CES / Daisy 均可输入；�
 
 需要 Python ≥ 3.10、setuptools ≥ 77，以及已安装的 TOAST 等
 [依赖](pyproject.toml)。生成器和可选 contract tests 另需 `fyst` extra 对应的
-FYST trajectories 0.10.x；writer / loader 不 import FYST。
-已验证环境为 TOAST 3.0.5、FYST 0.10.0（`f095c51` 加本地 UTC 补丁）；
-版本范围不代表所有版本均已测试。补丁、实际导入路径与 pip metadata 的区别见
+FYST trajectories 0.11.x；writer / loader 不 import FYST。
+已验证环境为 TOAST 3.0.5、FYST 0.11.0（`c933b7a`，已内置 UTC offset 修复，无本地补丁）；
+版本范围不代表所有版本均已测试。历史补丁、实际导入路径与 pip metadata 的区别见
 [依赖重建说明](docs/patches/README.md)，本 repo 不自动修改依赖。
 
 在已有依赖的环境、repo 根目录做 editable install（不会安装或更新依赖）：
@@ -142,7 +142,7 @@ RL-B 才接入 FYST 真实 roll；`data/` fixtures 仍保留 legacy 格式。
 - [`src/fyst_to_toast/sim_fyst.py`](src/fyst_to_toast/sim_fyst.py) 来自 TOAST `SimGround`（hpc4cmb/toast `9595449a`，`src/toast/ops/sim_ground.py`），
   保留 BSD-2-Clause：[许可](LICENSES/TOAST-BSD-2-Clause.txt) / [作者](LICENSES/TOAST-AUTHORS.txt)。
 - `docs/patches/*.patch` 含 FYST 源码，保留 [FYST BSD-3-Clause](LICENSES/fyst-trajectories-BSD-3-Clause.txt)；
-  补丁不自动应用，当前与历史 base 的区别见补丁说明。
+  这些历史补丁不自动应用，当前依赖 FYST 0.11.0 无需补丁，详见补丁说明。
 - writer 源自用户的本地、当时未跟踪的 working-tree example，并非 FYST upstream
   已发布贡献；来源及原文件 hash 记录在本地 `docs/UPSTREAM.json`（不上传）。TOAST / FYST 仍是独立依赖。
   **用户自己的代码暂未声明许可：仓库保持私有期间保留所有权利（all rights reserved），分享前再决定许可。**

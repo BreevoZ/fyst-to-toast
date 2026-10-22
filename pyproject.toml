@@ -19,8 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Used by fyst_to_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
-# Also requires the current UTC-offset patch in docs/patches; pip cannot express it.
-fyst = ["fyst-trajectories>=0.10,<0.11"]
+# 0.11.0 is the first release with UTC-offset ECSV times; no local patch is needed.
+fyst = ["fyst-trajectories>=0.11,<0.12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

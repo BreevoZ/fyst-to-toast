@@ -66,8 +66,8 @@ writer 接收生成器（或兼容的历史 exporter）保存的逐样本 QTable
   直接读入，转换为 deg / deg / m，不调用 FYST canonical-site fallback 或 snapping。
   CES / Daisy 历史输入的精确 site 对照见 本地笔记 `docs/steps/03-fyst-import-boundary.md`。
 
-FYST UTC offset 修复的当前 / 历史 base、hash 和重建方式见
-[补丁说明](patches/README.md)；同版本号不保证相同工作树行为。
+FYST v0.11.0 起 schedule 时间为毫秒加 `+00:00` 的 UTC 文本（修复已进入 upstream）；
+旧补丁、与 0.10 补丁版输出的差异和重建方式见 [补丁说明](patches/README.md)。
 
 ## H5 与 loader 契约
 
