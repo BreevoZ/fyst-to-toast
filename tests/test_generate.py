@@ -7,13 +7,18 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from astropy import units as u
 from astropy.coordinates import solar_system_ephemeris
 from astropy.table import QTable
+from astropy.time import Time
 from astropy.utils import iers
 
 pytest.importorskip(
@@ -23,7 +28,7 @@ pytest.importorskip(
 )
 
 from fyst_to_toast import trajectory_h5 as schema
-from fyst_to_toast.generate import generate_trajectory
+from fyst_to_toast.generate import build_trajectory_table, generate_trajectory
 
 
 # Pong's documented night includes an initial planet calibration before science.
@@ -47,12 +52,15 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             assert set(samples.meta) == set(schema.TRAJECTORY_META_KEYS)
             roll = samples[schema.ECSV_BORESIGHT_ROLL_DEG]
             assert roll.unit == u.deg and roll.dtype == np.float64
-            np.testing.assert_array_equal(roll.value, np.zeros(len(samples)))
-            assert (
-                samples.meta[schema.ROLL_SOURCE_KEY]
-                == schema.ROLL_SOURCE_PLACEHOLDER_ZERO
-            )
+            np.testing.assert_array_equal(roll.value, -samples[schema.ECSV_EL_DEG].value)
+            if case == "ces":
+                np.testing.assert_array_equal(roll.value, np.full(len(samples), -50.0))
+            else:
+                assert np.ptp(roll.value) > 0
+            assert samples.meta[schema.ROLL_SOURCE_KEY] == schema.ROLL_SOURCE_FYST
             assert samples.meta[schema.ROLL_CONVENTION_KEY] == schema.ROLL_CONVENTION
+            assert samples.meta[schema.ROLL_NASMYTH_PORT_KEY] == "right"
+            assert samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY] == 0.0
             blocks = samples.meta[schema.ECSV_BLOCKS]
             assert len(blocks) == len(report["science_blocks"]) == 1
             for block in blocks:
@@ -76,3 +84,52 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             )
             assert len(files) == len(blocks)
             assert all((Path(folder) / name).is_file() for name in files)
+
+
+@pytest.mark.parametrize("port,sign", [("right", 1), ("left", -1)])
+def test_build_instrument_rotation(tmp_path, port, sign):
+    from fyst_trajectories import Trajectory, get_fyst_site
+
+    start = Time("2026-03-15T04:00:00.000", scale="utc", precision=3)
+    trajectory = Trajectory(
+        times=np.array([0.0, 0.1, 0.2]),
+        az=np.array([30.0, 31.0, 32.0]),
+        el=np.array([40.0, 50.0, 60.0]),
+        az_vel=np.full(3, 10.0),
+        el_vel=np.full(3, 100.0),
+        start_time=start,
+    )
+    timeline = SimpleNamespace(
+        start_time=start, site=replace(get_fyst_site(), nasmyth_port=port)
+    )
+    block = SimpleNamespace(
+        scan_index=0, subscan_index=0, t_start=start,
+        t_stop=start + 0.3 * u.s, metadata={}, boresight_angle=123.0,
+    )
+    source = tmp_path / "schedule.ecsv"
+    source.write_text("synthetic schedule hash input\n")
+    samples = build_trajectory_table(
+        "test", timeline, [(block, SimpleNamespace(trajectory=trajectory))],
+        source, instrument_rotation_deg=17.0,
+    )
+    roll = samples[schema.ECSV_BORESIGHT_ROLL_DEG]
+    np.testing.assert_array_equal(roll.value, -(sign * trajectory.el + 17.0))
+    assert roll.unit == u.deg and roll.dtype == np.float64
+    assert samples.meta[schema.ROLL_NASMYTH_PORT_KEY] == port
+    assert samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY] == 17.0
+    assert isinstance(samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY], float)
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_reject_nonfinite_instrument_rotation(tmp_path, value):
+    with pytest.raises(ValueError, match="instrument_rotation_deg must be finite"):
+        generate_trajectory("ces", tmp_path, instrument_rotation_deg=float(value))
+    script = Path(__file__).resolve().parents[1] / "scripts/generate_trajectory.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "ces", "--output-dir", str(tmp_path),
+         f"--instrument-rotation-deg={value}"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert "instrument-rotation-deg 必须是有限值" in result.stderr
+    assert not list(tmp_path.iterdir())

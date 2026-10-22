@@ -110,15 +110,18 @@ rate 与实际时钟相对误差 ≤1e-6，不重采样。`trajectory_boresight_
 per-sample roll；显式 scalar angle Quantity 广播覆盖整段并记录来源。weather、HWP、detector filtering /
 splitting、修改运动的参数暂不支持；原 JSON 与 source hashes 单独保留。
 
-**RL-A roll 接口已接通，生成值暂为零。** ECSV 新增 `boresight_roll_deg`（deg、float64），
-metadata 为 `roll_source="placeholder_zero"`、`roll_convention="toast_q0_rz_local_z_v1"`。
+**RL-B 已填入逐样本真实 roll。** ECSV `boresight_roll_deg`（deg、float64）由 FYST 计算
+`ρ(t) = −(nasmyth_sign·El(t) + instrument_rotation)`；端口取自 schedule，
+`--instrument-rotation-deg` 默认 0，安装零角尚待仪器团队确认。metadata 记录
+`roll_source="fyst_focal_plane_rotation"`、`roll_nasmyth_port`、`roll_instrument_rotation_deg`，
+`roll_convention="toast_q0_rz_local_z_v1"` 不变。只用机械角，视差旋转由 TOAST 处理。
 writer 转为 H5 shared `boresight_roll`（rad、float64、每 sample 一个值），纳入 hash manifest；
 `trajectory_info` 和 `simfyst_info` 记录来源与 convention。该 convention 明确表示
 `Q0 = from_lonlat_angles(-az, el, 0)` 右乘绕 local +Z 的 `Rz(roll)`。
 缺列的 legacy ECSV 广播 `--roll-deg`，缺字段的 legacy H5 广播原 `trajectory_info.roll_deg`，
 来源记为 `legacy_scalar`；已有 ECSV roll 列时，非零 `--roll-deg` 会报错。
 全零 roll 跳过 quaternion 乘法，保持既有 boresight 数组字节；有非零值时整段向量化计算。
-RL-B 才接入 FYST 真实 roll；`data/` fixtures 仍保留 legacy 格式。
+`data/` fixtures 仍保留 legacy 格式。
 
 ## 目录与阅读入口
 

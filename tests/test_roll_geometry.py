@@ -1,4 +1,4 @@
-"""Roll convention checks; real FYST rotation is used only as a test oracle."""
+"""Production roll helper checked against FYST off-axis horizon geometry."""
 
 import os
 
@@ -13,6 +13,7 @@ import pytest
 from toast import qarray as qa
 from toast.instrument_coords import xieta_to_quat
 
+from fyst_to_toast.generate import toast_boresight_roll_deg
 from fyst_to_toast.trajectory_h5 import _boresight_with_roll
 
 
@@ -33,17 +34,21 @@ def test_zero_roll_skips_rotation(monkeypatch):
 
 
 @pytest.mark.parametrize("port", ["right", "left"])
-def test_fyst_off_axis_roll_contract(port):
+@pytest.mark.parametrize("instrument_rotation_deg", [0.0, 17.0])
+def test_fyst_off_axis_roll_contract(port, instrument_rotation_deg):
     fyst = pytest.importorskip("fyst_trajectories", exc_type=ImportError)
     site = replace(fyst.get_fyst_site(), nasmyth_port=port)
     az_deg = np.array([0.0, 45.0, 180.0, 270.0, 359.0])
     el_deg = np.array([25.0, 45.0, 60.0, 80.0, 35.0])
-    # Explicit test-only roll; RL-A generation must continue to supply zeros.
-    roll = np.deg2rad(-site.nasmyth_sign * el_deg)
+    roll = np.deg2rad(
+        toast_boresight_roll_deg(el_deg, site, instrument_rotation_deg)
+    )
     bore = _boresight_with_roll(np.deg2rad(az_deg), np.deg2rad(el_deg), roll)
     detector = xieta_to_quat(np.sin(np.deg2rad(1.0)), 0.0, 0.0)
     actual = qa.rotate(qa.mult(bore, detector), [0.0, 0.0, 1.0])
-    offset = fyst.InstrumentOffset(dx=60.0, dy=0.0)
+    offset = fyst.InstrumentOffset(
+        dx=60.0, dy=0.0, instrument_rotation=instrument_rotation_deg
+    )
     rotation = fyst.compute_focal_plane_rotation(el_deg, site=site, offset=offset)
     det_az, det_el = fyst.boresight_to_detector(az_deg, el_deg, offset, rotation)
     lon, lat = -np.deg2rad(det_az), np.deg2rad(det_el)
@@ -56,4 +61,7 @@ def test_fyst_off_axis_roll_contract(port):
     )
     error_arcsec = np.rad2deg(separation) * 3600
     assert np.max(error_arcsec) < 1.0
-    print(f"{port} Nasmyth: max off-axis error {np.max(error_arcsec):.6g} arcsec")
+    print(
+        f"{port} Nasmyth, {instrument_rotation_deg=}: "
+        f"max off-axis error {np.max(error_arcsec):.6g} arcsec"
+    )

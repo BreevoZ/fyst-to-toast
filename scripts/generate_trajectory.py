@@ -38,6 +38,12 @@ def main():
         help=f"整个 scheduling window，含 overhead；默认 {DEFAULT_DURATION_S} s",
     )
     parser.add_argument(
+        "--instrument-rotation-deg",
+        type=float,
+        default=0.0,
+        help="仪器机械安装零角（deg）；默认 0，尚待仪器团队确认",
+    )
+    parser.add_argument(
         "--output-dir", type=Path, help="默认本 repo 的 output/generated/<case>/"
     )
     parser.add_argument(
@@ -49,6 +55,8 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.duration_s) or args.duration_s <= 0:
         parser.error("duration-s 必须是有限正数")
+    if not math.isfinite(args.instrument_rotation_deg):
+        parser.error("instrument-rotation-deg 必须是有限值")
     folder = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
@@ -87,6 +95,7 @@ def main():
         folder,
         start=start,
         duration_s=args.duration_s,
+        instrument_rotation_deg=args.instrument_rotation_deg,
         iers_file=iers_path,
         overwrite=args.overwrite,
     )

@@ -53,9 +53,12 @@ writer 接收生成器（或兼容的历史 exporter）保存的逐样本 QTable
   `block_time_s` 保留原 `Trajectory.times`，不能假定每块从零开始。
 - `az_deg` / `el_deg` 是 mount AltAz degree；两轴 `az_velocity` / `el_velocity`
   单位 deg/s。`scan_flag` 是 FYST enum，scan/subscan 为原始整数编号。
-- RL-A 新增 `boresight_roll_deg`：deg、float64、shape `(N,)`，当前生成器只填零；
-  metadata 新增 `roll_source="placeholder_zero"` 与
-  `roll_convention="toast_q0_rz_local_z_v1"`。真实 FYST roll 留到 RL-B。
+- RL-B 的 `boresight_roll_deg` 为 deg、float64、shape `(N,)`：直接调用 FYST 得到
+  `ρ(t) = −(nasmyth_sign·El(t) + instrument_rotation)`，端口取自 schedule；
+  `instrument_rotation_deg` / CLI `--instrument-rotation-deg` 默认 0，尚待仪器团队确认。
+  ECSV metadata 记 `roll_source="fyst_focal_plane_rotation"`、`roll_nasmyth_port`、
+  `roll_instrument_rotation_deg`；convention 仍为 `toast_q0_rz_local_z_v1`。
+  不使用 schedule 的 `boresight_angle`；机械角不含视差旋转，由 TOAST 转天球时处理。
 - metadata 的 `case` 用于命名，`start_utc` 为窗口起点，`source_schedule_sha256`
   必须与实际 schedule 文件字节一致。`blocks` 保留原顺序及完整 metadata：
   `[first,last)`、编号、native/requested timestep、nominal block 起止和实际首末 sample 等。
@@ -198,12 +201,11 @@ True runs，直接传给 `IntervalList(times, samplespans=...)`，不做时间�
 writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAST longitude
 `-Az` 构造 boresight 并应用上述 roll，再调用 `azel_to_radec(..., use_ephem=True)`
 与 `site.position_velocity()`。IERS 表影响 pointing；复现时应选同一张表。
-真实 FYST focalplane / Nasmyth roll 尚未验收。`detdata=[]`，没有 detector signal、
-sky / atmosphere / noise simulation，也没有用独立 astrometry reference 验证 RA/Dec。
-旧 `tools/check_writer_roundtrip.py` 的 17 字段计数仅支持 legacy 输出；RL-A 新输出的
-writer / loader 契约由 `tests/test_trajectory_h5.py` 验证，旧工具尚待更新。
+真实 FYST focalplane 尚未验收；Nasmyth 端口与 instrument_rotation 待仪器团队确认。
+`detdata=[]`，没有 detector signal、sky / atmosphere / noise simulation，也没有用独立
+astrometry reference 验证 RA/Dec。`tools/check_writer_roundtrip.py` 兼容新（18 个）和
+legacy（17 个）shared arrays。
 
-后续是 **solar intervals** 与 **B3：方向区间**；多 block、Pong、MPI 和真实
-focalplane / roll 另行推进。
+后续是 **solar intervals** 与 **B3：方向区间**；多 block、MPI 和真实 focalplane 另行推进。
 Daisy 高 El 的上游 acceleration warnings 仍未解决，历史现象及限制见 W2；
 CES / Daisy 串行 IO 通过不代表所有 patterns 或运动约束已经验收。
