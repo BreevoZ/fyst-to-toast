@@ -79,7 +79,7 @@ def main():
         iers.earth_orientation_table.set(iers.IERS_A.open(str(iers_path)))
     solar_system_ephemeris.set("builtin")
     try:
-        start = Time(args.start or DEFAULT_START[args.case], scale="utc", precision=6)
+        start = Time(args.start or DEFAULT_START[args.case], scale="utc", precision=3)
     except ValueError as error:
         parser.error(f"无法解析 UTC start：{error}")
     report = generate_trajectory(

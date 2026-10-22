@@ -267,7 +267,7 @@ def generate_trajectory(
     from astropy.time import Time
 
     patch = build_legacy_patch(case)
-    start = Time(start or DEFAULT_START[case], scale="utc", precision=6)
+    start = Time(start or DEFAULT_START[case], scale="utc", precision=3)
     folder = Path(output_dir).expanduser().resolve()
     outputs = [folder / name for name in OUTPUT_NAMES]
     if not overwrite and any(path.exists() for path in outputs):
