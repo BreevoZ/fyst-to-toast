@@ -114,8 +114,10 @@ def main():
 
             arrays = {key: np.asarray(obs.shared[key].data) for key in obs.shared}
             recorded = json.loads(obs["shared_array_sha256"])
+            # 新 writer 总是保存逐样本 boresight_roll（18 个字段）；旧 writer 的文件没有（17 个）。
+            has_roll = "boresight_roll" in arrays
             require(
-                len(arrays) == 17 and set(arrays) == set(recorded),
+                len(arrays) == (18 if has_roll else 17) and set(arrays) == set(recorded),
                 f"{name}: shared 字段不符",
             )
             for key, values in arrays.items():
@@ -143,6 +145,15 @@ def main():
             for key, expected in expected_arrays.items():
                 np.testing.assert_array_equal(
                     arrays[key], expected, err_msg=f"{name}/{key}"
+                )
+            if has_roll:
+                # ECSV 有 roll 列就逐点对照；旧 ECSV 则应是 writer 记录的常数 roll_deg。
+                if "boresight_roll_deg" in part.colnames:
+                    expected_roll = part["boresight_roll_deg"].to_value(u.rad)
+                else:
+                    expected_roll = np.full(len(part), np.radians(info["roll_deg"]))
+                np.testing.assert_array_equal(
+                    arrays["boresight_roll"], expected_roll, err_msg=f"{name}/boresight_roll"
                 )
             require(np.all(np.diff(arrays["times"]) > 0), f"{name}: 时间不严格递增")
             np.testing.assert_array_equal(arrays["scan_index"], block["scan_index"])
@@ -199,7 +210,7 @@ def main():
                     "case": case,
                     "observations": reports,
                     "samples": len(samples),
-                    "shared_arrays_per_observation": 17,
+                    "shared_arrays_per_observation": len(arrays),
                     "input_arrays_compared_exactly": list(expected_arrays),
                     "flags_mapping_checked": True,
                     "detectors_per_observation": 5,

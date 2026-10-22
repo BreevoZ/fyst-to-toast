@@ -24,7 +24,12 @@ from toast.mpi import Comm
 from toast.ops import SaveHDF5
 
 from fyst_to_toast.sim_fyst import SimFYST
-from fyst_to_toast.trajectory_h5 import _load_trajectory_block
+from fyst_to_toast.trajectory_h5 import (
+    H5_BORESIGHT_ROLL,
+    ROLL_CONVENTION_KEY,
+    ROLL_SOURCE_KEY,
+    _load_trajectory_block,
+)
 
 
 def field_unit(key):
@@ -93,7 +98,8 @@ def main():
             for key in obs.shared:
                 array = obs.shared[key].data
                 print(
-                    f"  {key:<25} {array.dtype!s:<8} {array.shape!s:<12} {field_unit(key)}"
+                    f"  {key:<25} {array.dtype!s:<8} {array.shape!s:<12} "
+                    f"{'rad' if key == H5_BORESIGHT_ROLL else field_unit(key)}"
                 )
             for key in obs.detdata:
                 array = obs.detdata[key]
@@ -105,6 +111,7 @@ def main():
             print(f"Metadata: {', '.join(sorted(obs))}")
             info = json.loads(obs["simfyst_info"])
             print(f"Rate check: {json.dumps(info['rate_check'], sort_keys=True)}")
+            print(f"Roll: {info[ROLL_SOURCE_KEY]}; {info[ROLL_CONVENTION_KEY]}")
             print(f"flags/intervals: {info['flags/intervals']}")
             print(f"Flag mapping (FYST enum -> TOAST mask): {info['flag_mapping']}")
             print(f"Class samples: {info['class_counts']}")

@@ -1,4 +1,4 @@
-"""Serial trajectory HDF5 writer and block loader; no SimFYST wiring yet.
+"""Serial trajectory HDF5 writer and block loader for SimFYST.
 
 The caller configures MPI / thread settings before importing numerical libraries.
 The caller also configures IERS before writing. The writer retains the five-detector
@@ -32,6 +32,15 @@ ECSV_EL_VELOCITY = "el_velocity"
 ECSV_SCAN_FLAG = "scan_flag"
 ECSV_SCAN_INDEX = "scan_index"
 ECSV_SUBSCAN_INDEX = "subscan_index"
+ECSV_BORESIGHT_ROLL_DEG = "boresight_roll_deg"
+# Shared ECSV / H5 metadata and the TOAST shared-array name (radians).
+H5_BORESIGHT_ROLL = "boresight_roll"
+ROLL_SOURCE_KEY = "roll_source"
+ROLL_CONVENTION_KEY = "roll_convention"
+ROLL_CONVENTION = "toast_q0_rz_local_z_v1"
+ROLL_SOURCE_PLACEHOLDER_ZERO = "placeholder_zero"
+ROLL_SOURCE_LEGACY_SCALAR = "legacy_scalar"
+ROLL_SOURCE_OVERRIDE = "trajectory_boresight_angle"
 ECSV_CASE = "case"
 ECSV_COORDINATE_FRAME = "coordinate_frame"
 ECSV_START_UTC = "start_utc"
@@ -60,6 +69,7 @@ TRAJECTORY_COLUMNS = (
     ECSV_SCAN_FLAG,
     ECSV_SCAN_INDEX,
     ECSV_SUBSCAN_INDEX,
+    ECSV_BORESIGHT_ROLL_DEG,
 )
 
 TRAJECTORY_META_KEYS = (
@@ -70,6 +80,8 @@ TRAJECTORY_META_KEYS = (
     ECSV_SOURCE_SCHEDULE_SHA256,
     ECSV_BLOCKS,
     ECSV_TIME_NOTE,
+    ROLL_SOURCE_KEY,
+    ROLL_CONVENTION_KEY,
 )
 
 TRAJECTORY_BLOCK_KEYS = (
@@ -101,6 +113,7 @@ _TRAJECTORY_FIELDS = (
     "scan_index",
     "subscan_index",
 )
+_TRAJECTORY_ARRAY_FIELDS = (*_TRAJECTORY_FIELDS, H5_BORESIGHT_ROLL)
 
 
 _TRAJECTORY_INFO_KEY = "trajectory_info"
@@ -125,13 +138,16 @@ class _TrajectoryBlock:
     actual_rate_hz: float
     max_phase_residual_s: float
     time_tolerance_s: float
+    roll_source: str
+    roll_convention: str
 
 
 def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
     """Read and validate one writer H5 without changing any input array bytes.
 
     LoadHDF5 decodes the existing TOAST schema. All loaded shared arrays are
-    checked against the optional source manifest; only the 12 inputs are returned.
+    checked against the optional source manifest. Return the 12 original inputs
+    plus roll, synthesized from roll_deg only for legacy H5 without the array.
     Invalid trajectory content raises ValueError. Native IO errors propagate.
     """
     from toast import Data, ops
@@ -148,7 +164,10 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
             raise ValueError(f"Expected exactly one observation, got {len(data.obs)}")
         obs = data.obs[0]
         arrays = {}
-        for key in _TRAJECTORY_FIELDS:
+        fields = list(_TRAJECTORY_FIELDS)
+        if H5_BORESIGHT_ROLL in obs.shared:
+            fields.append(H5_BORESIGHT_ROLL)
+        for key in fields:
             if key not in obs.shared:
                 raise ValueError(f"Missing trajectory field: {key}")
             values = np.copy(obs.shared[key].data)
@@ -178,6 +197,25 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
             raise ValueError("trajectory_info must contain a block object")  # noqa: TRY004
         if info["block"].get("samples") != n_samples:
             raise ValueError(f"trajectory_info block.samples must equal N={n_samples}")
+
+        if H5_BORESIGHT_ROLL in arrays:
+            _validate_boresight_roll(arrays[H5_BORESIGHT_ROLL], n_samples)
+            roll_source = _validate_roll_metadata(info)
+        else:
+            try:
+                scalar = float(info["roll_deg"])
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    "trajectory_info.roll_deg must be a finite scalar angle"
+                ) from error
+            if not np.isfinite(scalar):
+                raise ValueError(
+                    "trajectory_info.roll_deg must be a finite scalar angle"
+                )
+            arrays[H5_BORESIGHT_ROLL] = np.full(
+                n_samples, np.deg2rad(scalar), dtype=np.float64
+            )
+            roll_source = ROLL_SOURCE_LEGACY_SCALAR
 
         unknown = np.setdiff1d(arrays["fyst_scan_flag"], [0, 1, 2, 3])
         if unknown.size:
@@ -216,6 +254,8 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
             actual_rate_hz=actual_rate,
             max_phase_residual_s=residual,
             time_tolerance_s=tolerance,
+            roll_source=roll_source,
+            roll_convention=ROLL_CONVENTION,
         )
     finally:
         data.clear()
@@ -272,6 +312,57 @@ def _check_sample_rate(
     }
 
 
+def _validate_roll_metadata(metadata):
+    """Reject ambiguous per-sample angles instead of guessing their convention."""
+    if metadata.get(ROLL_CONVENTION_KEY) != ROLL_CONVENTION:
+        raise ValueError(f"{ROLL_CONVENTION_KEY} must be {ROLL_CONVENTION!r}")
+    source = metadata.get(ROLL_SOURCE_KEY)
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError(f"{ROLL_SOURCE_KEY} must be a non-empty string")
+    return source
+
+
+def _validate_boresight_roll(values, n_samples):
+    """Validate the radians array without changing its dtype or bytes."""
+    if values.ndim != 1 or len(values) != n_samples:
+        raise ValueError(f"{H5_BORESIGHT_ROLL}: expected shape ({n_samples},)")
+    if values.dtype != np.dtype(np.float64):
+        raise ValueError(f"{H5_BORESIGHT_ROLL}: expected float64")
+    if not np.isfinite(values).all():
+        raise ValueError(f"{H5_BORESIGHT_ROLL}: all values must be finite")
+
+
+def _roll_from_ecsv(samples, roll_deg=0.0):
+    """Resolve and validate roll once for all blocks; also used by the CLI."""
+    if np.ndim(roll_deg) != 0 or not np.isfinite(roll_deg):
+        raise ValueError("roll_deg must be a finite scalar angle")
+    if ECSV_BORESIGHT_ROLL_DEG in samples.colnames:
+        if roll_deg != 0:
+            raise ValueError(
+                f"{ECSV_BORESIGHT_ROLL_DEG} cannot be combined with non-default --roll-deg"
+            )
+        source = _validate_roll_metadata(samples.meta)
+        from astropy import units as u
+
+        values = np.asarray(samples[ECSV_BORESIGHT_ROLL_DEG].to_value(u.rad))
+    else:
+        source = ROLL_SOURCE_LEGACY_SCALAR
+        values = np.full(len(samples), np.deg2rad(roll_deg), dtype=np.float64)
+    _validate_boresight_roll(values, len(samples))
+    return values, source
+
+
+def _boresight_with_roll(az, el, roll_rad):
+    """Q0(-Az, El, 0) right-multiplied by local +Z rotation, in radians."""
+    from toast import qarray as qa
+
+    bore = qa.from_lonlat_angles(-az, el, np.zeros_like(el))
+    # Preserve Q0 bytes for zero placeholders and legacy zero-roll trajectories.
+    if np.any(roll_rad != 0):
+        bore = qa.mult(bore, qa.rotation(np.array([0.0, 0.0, 1.0]), roll_rad))
+    return bore
+
+
 def write_trajectory_blocks(
     samples: QTable,
     *,
@@ -289,6 +380,8 @@ def write_trajectory_blocks(
     with half-open ``first`` / ``last`` slices and ``native_timestep_s``. Columns
     retain the ECSV units; no samples or block boundaries are regenerated.
     ``source_sha256`` identifies the original trajectory ECSV in H5 metadata.
+    Per-sample roll takes precedence; a nonzero legacy roll_deg with that column
+    is rejected. Legacy ECSV broadcasts roll_deg. All-zero roll preserves Q0 bytes.
 
     The caller configures MPI / threads and IERS, validates inputs and overwrite
     policy, and creates the output directory. Return ordered H5 basenames; the
@@ -296,7 +389,6 @@ def write_trajectory_blocks(
     """
     from astropy import units as u
     from toast import Data, Observation, ops
-    from toast import qarray as qa
     from toast.coordinates import azel_to_radec
     from toast.instrument import Focalplane, GroundSite, Session, Telescope
     from toast.instrument_sim import fake_hexagon_focalplane
@@ -309,6 +401,7 @@ def write_trajectory_blocks(
         to_toast_flags,
     )
 
+    roll_values, roll_source = _roll_from_ecsv(samples, roll_deg)
     folder = Path(output_dir)
     case = samples.meta[ECSV_CASE]
     # 1. 五个 detectors 是 TOAST 自带的示意 focalplane。
@@ -354,11 +447,8 @@ def write_trajectory_blocks(
             files.append(f"{name}.h5")
 
             # 2. TOAST 的方向约定：Az 顺时针，而 longitude 逆时针。
-            # 固定 roll 是 IO/pointing 诊断设置，不是已经验收的 FYST Nasmyth 姿态。
-            bore = qa.from_lonlat_angles(-az, el, np.zeros_like(el))
-            bore = qa.mult(
-                bore, qa.rotation(np.array([0.0, 0.0, 1.0]), np.radians(roll_deg))
-            )
+            roll = roll_values[block[ECSV_FIRST] : block[ECSV_LAST]]
+            bore = _boresight_with_roll(az, el, roll)
             radec = azel_to_radec(site, times, bore, use_ephem=True)
             position, velocity = site.position_velocity(times)
 
@@ -398,6 +488,7 @@ def write_trajectory_blocks(
                     strict=True,
                 )
             )
+            arrays[H5_BORESIGHT_ROLL] = roll
             for key, values in arrays.items():
                 assert np.isfinite(values).all()
                 obs.shared.create_column(key, shape=values.shape, dtype=values.dtype)
@@ -410,7 +501,13 @@ def write_trajectory_blocks(
                     "source_sha256": source_sha256,
                     "start_utc": samples.meta[ECSV_START_UTC],
                     "block": block,
-                    "roll_deg": roll_deg,
+                    **(
+                        {"roll_deg": roll_deg}
+                        if ECSV_BORESIGHT_ROLL_DEG not in samples.colnames
+                        else {}
+                    ),
+                    ROLL_SOURCE_KEY: roll_source,
+                    ROLL_CONVENTION_KEY: ROLL_CONVENTION,
                     "sample_rate_hz": rate.to_value(u.Hz),
                     "fyst_flag_values": {
                         "scanning": SCAN_FLAG_SCIENCE,

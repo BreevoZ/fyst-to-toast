@@ -9,7 +9,6 @@ import hashlib
 import json
 import shutil
 import socket
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +31,7 @@ from toast.schedule import GroundSchedule
 from toast.utils import name_UID
 
 from fyst_to_toast import sim_fyst
+from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.fyst_flags import (
     SCAN_FLAG_RETUNE,
     SCAN_FLAG_SCIENCE,
@@ -184,7 +184,7 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
     )
     assert "shared_array_sha256" not in obs
     info = json.loads(obs["simfyst_info"])
-    assert info["contract_version"] == "B2.3"
+    assert info["contract_version"] == "RL-A"
     assert info["source_file"] == source.path.name
     assert info["source_sha256"] == hashlib.sha256(source.path.read_bytes()).hexdigest()
     assert info["samples"] == len(t)
@@ -197,8 +197,14 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
         "rtol": 1e-6,
     }
     assert info["roll_deg"] == roll_deg
-    assert info["roll_source"] == (
-        "trajectory_info.roll_deg" if roll is None else "trajectory_boresight_angle"
+    assert info[schema.ROLL_SOURCE_KEY] == (
+        schema.ROLL_SOURCE_LEGACY_SCALAR
+        if roll is None
+        else schema.ROLL_SOURCE_OVERRIDE
+    )
+    assert info[schema.ROLL_CONVENTION_KEY] == schema.ROLL_CONVENTION
+    np.testing.assert_array_equal(
+        obs.shared[schema.H5_BORESIGHT_ROLL].data, np.deg2rad(roll_deg)
     )
     assert (
         info["caller_telescope"] == telescope.name
@@ -249,6 +255,7 @@ UNSUPPORTED = [
     ("scan_accel_az", 2 * u.deg / u.s**2),
     ("scan_accel_el", 2 * u.deg / u.s**2),
     ("times", "fyst_time_s"),
+    ("times", schema.H5_BORESIGHT_ROLL),
     ("position", "azimuth"),
     ("velocity", "position"),
     ("det_data", "flags"),
@@ -256,6 +263,7 @@ UNSUPPORTED = [
     ("trajectory_boresight_angle", np.inf * u.deg),
     ("shared_flags", None),
     ("shared_flags", "times"),
+    ("shared_flags", schema.H5_BORESIGHT_ROLL),
     ("shared_flags", "boresight_azel"),
     ("scanning_interval", ""),
     ("turnaround_interval", "scanning"),
@@ -372,26 +380,80 @@ def test_serial_rejection(source, key, value):
 
 
 @pytest.mark.parametrize("roll", [None, float("nan"), float("inf"), "invalid"])
-def test_bad_source_roll(source, data, monkeypatch, roll):
-    block = _load_trajectory_block(source.path)
-    info = dict(block.trajectory_info)
-    if roll is None:
-        del info["roll_deg"]
-    else:
-        info["roll_deg"] = roll
-    monkeypatch.setattr(
-        sim_fyst,
-        "_load_trajectory_block",
-        lambda path: replace(block, trajectory_info=info),
+def test_bad_source_roll(source, data, tmp_path, roll):
+    path = tmp_path / source.path.name
+    shutil.copyfile(source.path, path)
+    with h5py.File(path, "r+") as saved:
+        metadata = saved["metadata/other"].attrs
+        info = json.loads(metadata["trajectory_info"])
+        if roll is None:
+            del info["roll_deg"]
+        else:
+            info["roll_deg"] = roll
+        metadata["trajectory_info"] = json.dumps(info)
+    # The loader now owns legacy scalar validation, including before an override.
+    for override in (None, 10 * u.deg):
+        op = SimFYST(
+            telescope=caller(source),
+            trajectory_file=str(path),
+            trajectory_boresight_angle=override,
+        )
+        with pytest.raises(ValueError, match="roll_deg.*finite"):
+            op.apply(data)
+        assert data.obs == []
+
+
+@pytest.mark.parametrize("override", [None, 0 * u.deg, 11 * u.deg])
+def test_per_sample_roll_and_override(source, data, tmp_path, override):
+    path = tmp_path / source.path.name
+    shutil.copyfile(source.path, path)
+    roll = np.linspace(-0.3, 0.5, len(source.arrays["times"]))
+    with h5py.File(path, "r+") as saved:
+        ds = saved["shared"].create_dataset(schema.H5_BORESIGHT_ROLL, data=roll)
+        ds.attrs["comm_type"] = "column"
+        metadata = saved["metadata/other"].attrs
+        info = json.loads(metadata["trajectory_info"])
+        info[schema.ROLL_SOURCE_KEY] = "test_ramp"
+        info[schema.ROLL_CONVENTION_KEY] = schema.ROLL_CONVENTION
+        metadata["trajectory_info"] = json.dumps(info)
+        manifest = json.loads(metadata["shared_array_sha256"])
+        manifest[schema.H5_BORESIGHT_ROLL] = hashlib.sha256(roll.tobytes()).hexdigest()
+        metadata["shared_array_sha256"] = json.dumps(manifest)
+    loaded = _load_trajectory_block(path)
+    assert loaded.arrays[schema.H5_BORESIGHT_ROLL].tobytes() == roll.tobytes()
+    op = SimFYST(
+        telescope=caller(source),
+        trajectory_file=str(path),
+        trajectory_boresight_angle=override,
     )
-    op = SimFYST(telescope=caller(source), trajectory_file=str(source.path))
-    with pytest.raises(ValueError, match="roll_deg.*finite"):
-        op.apply(data)
-    assert data.obs == []
-    # Explicit roll overrides even an unusable source default; original JSON stays intact.
-    op.trajectory_boresight_angle = 10 * u.deg
     op.apply(data)
-    assert data.obs[0]["trajectory_info"] == block.trajectory_info_json
+    obs = data.obs[0]
+    effective = (
+        roll if override is None else np.full(len(roll), override.to_value(u.rad))
+    )
+    np.testing.assert_array_equal(obs.shared[schema.H5_BORESIGHT_ROLL].data, effective)
+    q0 = qa.from_lonlat_angles(
+        -source.arrays["azimuth"], source.arrays["elevation"], np.zeros(len(roll))
+    )
+    expected = np.array(
+        [qa.mult(q, qa.rotation([0.0, 0.0, 1.0], r)) for q, r in zip(q0, effective)]
+    )
+    np.testing.assert_allclose(
+        obs.shared[op.boresight_azel].data, expected, rtol=0, atol=1e-15
+    )
+    if override is not None and override.value == 0:
+        assert obs.shared[op.boresight_azel].data.tobytes() == q0.tobytes()
+    for key, values in source.arrays.items():
+        assert obs.shared[key].data.tobytes() == values.tobytes()
+    assert obs["trajectory_info"] == loaded.trajectory_info_json
+    info = json.loads(obs["simfyst_info"])
+    assert info[schema.ROLL_SOURCE_KEY] == (
+        "test_ramp" if override is None else schema.ROLL_SOURCE_OVERRIDE
+    )
+    assert info[schema.ROLL_CONVENTION_KEY] == schema.ROLL_CONVENTION
+    if override is None:
+        assert info["roll_deg"] is None
+    assert_motion_classification(obs, op, source.arrays["fyst_scan_flag"])
 
 
 @pytest.mark.parametrize(

@@ -9,6 +9,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import hashlib
 from pathlib import Path
 
+import numpy as np
 import pytest
 from astropy import units as u
 from astropy.coordinates import solar_system_ephemeris
@@ -44,6 +45,14 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             assert samples.meta[schema.ECSV_CASE] == case
             assert tuple(samples.colnames) == schema.TRAJECTORY_COLUMNS
             assert set(samples.meta) == set(schema.TRAJECTORY_META_KEYS)
+            roll = samples[schema.ECSV_BORESIGHT_ROLL_DEG]
+            assert roll.unit == u.deg and roll.dtype == np.float64
+            np.testing.assert_array_equal(roll.value, np.zeros(len(samples)))
+            assert (
+                samples.meta[schema.ROLL_SOURCE_KEY]
+                == schema.ROLL_SOURCE_PLACEHOLDER_ZERO
+            )
+            assert samples.meta[schema.ROLL_CONVENTION_KEY] == schema.ROLL_CONVENTION
             blocks = samples.meta[schema.ECSV_BLOCKS]
             assert len(blocks) == len(report["science_blocks"]) == 1
             for block in blocks:

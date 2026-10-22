@@ -73,8 +73,14 @@ from .fyst_flags import (
     to_toast_flags,
 )
 from .trajectory_h5 import (
+    H5_BORESIGHT_ROLL,
+    ROLL_CONVENTION_KEY,
+    ROLL_SOURCE_KEY,
+    ROLL_SOURCE_OVERRIDE,
+    _TRAJECTORY_ARRAY_FIELDS,
     _TRAJECTORY_FIELDS,
     _TRAJECTORY_INFO_KEY,
+    _boresight_with_roll,
     _check_sample_rate,
     _load_trajectory_block,
 )
@@ -121,7 +127,7 @@ class SimFYST(Operator):
     trajectory_boresight_angle = Quantity(
         None,
         allow_none=True,
-        help="Fixed trajectory roll; None uses the source trajectory_info roll_deg",
+        help="Fixed trajectory roll override; None uses the source per-sample roll",
     )
 
     telescope = Instance(
@@ -1374,7 +1380,7 @@ class SimFYST(Operator):
         if len(set(names.values())) != len(names):
             raise ValueError("trajectory shared output names must be distinct")
         for native, output in names.items():
-            if not output or (output in _TRAJECTORY_FIELDS and output != native):
+            if not output or (output in _TRAJECTORY_ARRAY_FIELDS and output != native):
                 raise ValueError(
                     f"trajectory output {native}={output!r} conflicts with original fields"
                 )
@@ -1382,7 +1388,7 @@ class SimFYST(Operator):
             raise ValueError("det_data and det_flags must have distinct names")
         if (
             not self.shared_flags
-            or self.shared_flags in _TRAJECTORY_FIELDS
+            or self.shared_flags in _TRAJECTORY_ARRAY_FIELDS
             or self.shared_flags in names.values()
         ):
             raise ValueError(
@@ -1426,25 +1432,18 @@ class SimFYST(Operator):
             rtol=1e-6,
         )
         if self.trajectory_boresight_angle is None:
-            roll_source = "trajectory_info.roll_deg"
-            try:
-                roll = float(block.trajectory_info["roll_deg"]) * u.deg
-            except (KeyError, TypeError, ValueError) as error:
-                raise ValueError(
-                    "trajectory_info.roll_deg must be a finite scalar angle"
-                ) from error
+            roll_source = block.roll_source
+            roll_rad = block.arrays[H5_BORESIGHT_ROLL]
         else:
-            roll_source = "trajectory_boresight_angle"
-            roll = self.trajectory_boresight_angle
-        roll_rad = roll.to_value(u.rad)
-        if np.ndim(roll_rad) != 0 or not np.isfinite(roll_rad):
-            raise ValueError(f"{roll_source} must be a finite scalar angle")
+            roll_source = ROLL_SOURCE_OVERRIDE
+            scalar = self.trajectory_boresight_angle.to_value(u.rad)
+            if np.ndim(scalar) != 0 or not np.isfinite(scalar):
+                raise ValueError(f"{roll_source} must be a finite scalar angle")
+            roll_rad = np.full(len(block.arrays["times"]), scalar, dtype=np.float64)
 
         times, az, el = (block.arrays[key] for key in _TRAJECTORY_FIELDS[:3])
         position, velocity = site.position_velocity(times)
-        bore_azel = qa.from_lonlat_angles(-az, el, np.zeros_like(el))
-        if roll_rad != 0:
-            bore_azel = qa.mult(bore_azel, qa.rotation(np.array([0, 0, 1.0]), roll_rad))
+        bore_azel = _boresight_with_roll(az, el, roll_rad)
         backend = {
             "use_ephem": self.use_ephem,
             "use_qpoint": self.use_qpoint,
@@ -1459,7 +1458,7 @@ class SimFYST(Operator):
             end=datetime.fromtimestamp(times[-1], tz=timezone.utc),
         )
         info = {
-            "contract_version": "B2.3",
+            "contract_version": "RL-A",
             "source_file": source.name,
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "samples": len(times),
@@ -1468,8 +1467,14 @@ class SimFYST(Operator):
             "rate_check": rate_check,
             "max_phase_residual_s": block.max_phase_residual_s,
             "time_tolerance_s": block.time_tolerance_s,
-            "roll_deg": float(roll.to_value(u.deg)),
-            "roll_source": roll_source,
+            # Retain the scalar summary only when the whole series is constant.
+            "roll_deg": (
+                float(np.rad2deg(roll_rad[0]))
+                if np.all(roll_rad == roll_rad[0])
+                else None
+            ),
+            ROLL_SOURCE_KEY: roll_source,
+            ROLL_CONVENTION_KEY: block.roll_convention,
             "caller_telescope": telescope.name,
             "caller_site": site.name,
             "coordinate_backend": backend,
@@ -1501,6 +1506,7 @@ class SimFYST(Operator):
             )
             values = {**block.arrays, **geometry}
             arrays = dict(block.arrays)
+            arrays[H5_BORESIGHT_ROLL] = roll_rad
             arrays.update(
                 {
                     output: values[key]
@@ -1568,7 +1574,7 @@ class SimFYST(Operator):
                 "shared": list(
                     dict.fromkeys(
                         [
-                            *_TRAJECTORY_FIELDS,
+                            *_TRAJECTORY_ARRAY_FIELDS,
                             *self._trajectory_shared_names().values(),
                             self.shared_flags,
                         ]

@@ -50,7 +50,7 @@ def parse_args():
         "--roll-deg",
         type=float,
         default=0.0,
-        help="诊断用固定 local boresight roll，默认 0 deg",
+        help="仅用于 legacy ECSV 的固定 local boresight roll；默认 0 deg",
     )
     parser.add_argument(
         "--overwrite",
@@ -89,7 +89,14 @@ def main():
     from astropy.table import QTable
     from astropy.utils import iers
 
-    from fyst_to_toast.trajectory_h5 import write_trajectory_blocks
+    from fyst_to_toast.trajectory_h5 import (
+        ECSV_BORESIGHT_ROLL_DEG,
+        ROLL_CONVENTION,
+        ROLL_CONVENTION_KEY,
+        ROLL_SOURCE_KEY,
+        _roll_from_ecsv,
+        write_trajectory_blocks,
+    )
 
     iers.conf.auto_download = False
     iers.conf.iers_degraded_accuracy = "error"
@@ -102,6 +109,10 @@ def main():
     if not np.isfinite(args.roll_deg):
         parser.error("roll 必须是有限数值")
     samples = QTable.read(source)
+    try:
+        _, roll_source = _roll_from_ecsv(samples, args.roll_deg)
+    except ValueError as error:
+        parser.error(str(error))
     source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     schedule_hash = hashlib.sha256(schedule.read_bytes()).hexdigest()
     if samples.meta.get("source_schedule_sha256") != schedule_hash:
@@ -167,7 +178,11 @@ def main():
         "files": files,
         "source_sha256": source_hash,
         "schedule_sha256": schedule_hash,
-        "roll_deg": args.roll_deg,
+        "roll_deg": (
+            args.roll_deg if ECSV_BORESIGHT_ROLL_DEG not in samples.colnames else None
+        ),
+        ROLL_SOURCE_KEY: roll_source,
+        ROLL_CONVENTION_KEY: ROLL_CONVENTION,
         "detectors_per_observation": 5,
         "detdata_saved": [],
         "interval_policy": "rebuild from original FYST flags",

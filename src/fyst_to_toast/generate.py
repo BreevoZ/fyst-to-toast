@@ -162,6 +162,9 @@ def build_trajectory_table(case, science_timeline, pairs, source):
         chunk[schema.ECSV_SUBSCAN_INDEX] = np.full(
             len(chunk), block.subscan_index, dtype=np.int32
         )
+        chunk[schema.ECSV_BORESIGHT_ROLL_DEG] = (
+            np.zeros(len(chunk), dtype=np.float64) * u.deg
+        )
         if len(chunk) < 2:
             raise RuntimeError(
                 "science block 少于两个 samples，无法计算 native timestep"
@@ -198,6 +201,8 @@ def build_trajectory_table(case, science_timeline, pairs, source):
         schema.ECSV_SOURCE_SCHEDULE_SHA256: sha256(source),
         schema.ECSV_BLOCKS: blocks,
         schema.ECSV_TIME_NOTE: "time_s since timeline start; block_time_s is unchanged Trajectory.times",
+        schema.ROLL_SOURCE_KEY: schema.ROLL_SOURCE_PLACEHOLDER_ZERO,
+        schema.ROLL_CONVENTION_KEY: schema.ROLL_CONVENTION,
     }
     return samples
 

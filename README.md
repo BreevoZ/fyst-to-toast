@@ -49,13 +49,14 @@ python tools/ecsv_reader.py "$RUN_DIR/schedule.ecsv" --view text --pager never -
 python tools/ecsv_reader.py "$RUN_DIR/fyst_trajectory.ecsv" --view text --pager never \
   --rows 5 --columns time_s,az_deg,el_deg,scan_flag --full
 python tools/h5reader.py "$RUN_DIR/hdf5/fyst_ces_000_000.h5" --view text --tree
-python tools/check_writer_roundtrip.py "$RUN_DIR/fyst_trajectory.ecsv" "$RUN_DIR/hdf5"
 ```
 
 生成结果为 `full_timeline.ecsv`、science-only `schedule.ecsv`、逐样本
 `fyst_trajectory.ecsv` 和 `report.json`。writer 默认读取同目录的 schedule，核对其
 SHA-256，每 native block 写一个 H5；`files.json` 列出本轮文件，
-`writer_report.json` 记录写入设置。roundtrip 才验证原生 `LoadHDF5` 读回结果。
+`writer_report.json` 记录写入设置。writer / loader 的原生 `LoadHDF5` roundtrip 由
+`pytest tests/test_trajectory_h5.py` 验证；`tools/check_writer_roundtrip.py` 可手动核对
+新 writer 的 18 个 shared arrays（含 `boresight_roll`）或旧 writer 的 17 个。
 改为 `daisy` 或 `pong` 并另选目录可运行 Daisy / Pong（Pong 参数取自 FYST
 `docs/trajectory_examples.rst` 的示例：RA/Dec 180°/−30°，2°×2°，0.4°/s，周期 240 s）；
 已有输出默认拒绝覆盖。
@@ -97,7 +98,7 @@ python -m pytest tests -q
 示例显式建立 source site 坐标上的 caller Telescope（两个 boresight detectors、标称
 10 Hz），打印字段 dtype / shape / 契约单位、metadata 与 rate check，再通过原生
 `SaveHDF5` 保存；输出目录存在时必须传 `--overwrite` 才能重跑。
-输出默认含 17 个 shared arrays（12 个原始输入 + 4 个派生 geometry + uint8 shared flags）
+输出默认含 18 个 shared arrays（12 个原始输入 + per-sample roll + 4 个派生 geometry + uint8 shared flags）
 与清零的 detector signal / flags；文件里的五个 demo detectors 不用作运行仪器。
 FYST science → 0、turnaround → turnaround_mask（默认 4）、unclassified / retune → invalid
 （默认 1）。三个 motion intervals 从原 enum 的整数 `[first,last)` spans 创建；示例打印
@@ -106,8 +107,18 @@ FYST science → 0、turnaround → turnaround_mask（默认 4）、unclassified
 library 用法为 `SimFYST(telescope=caller_telescope, trajectory_file=str(path)).apply(data)`，
 要求空 `Data`、串行、caller site 与 source site 的 Cartesian 距离 ≤1 mm；caller sample
 rate 与实际时钟相对误差 ≤1e-6，不重采样。`trajectory_boresight_angle=None` 使用来源
-`roll_deg`，显式 angle Quantity 可覆盖并记录来源。weather、HWP、detector filtering /
+per-sample roll；显式 scalar angle Quantity 广播覆盖整段并记录来源。weather、HWP、detector filtering /
 splitting、修改运动的参数暂不支持；原 JSON 与 source hashes 单独保留。
+
+**RL-A roll 接口已接通，生成值暂为零。** ECSV 新增 `boresight_roll_deg`（deg、float64），
+metadata 为 `roll_source="placeholder_zero"`、`roll_convention="toast_q0_rz_local_z_v1"`。
+writer 转为 H5 shared `boresight_roll`（rad、float64、每 sample 一个值），纳入 hash manifest；
+`trajectory_info` 和 `simfyst_info` 记录来源与 convention。该 convention 明确表示
+`Q0 = from_lonlat_angles(-az, el, 0)` 右乘绕 local +Z 的 `Rz(roll)`。
+缺列的 legacy ECSV 广播 `--roll-deg`，缺字段的 legacy H5 广播原 `trajectory_info.roll_deg`，
+来源记为 `legacy_scalar`；已有 ECSV roll 列时，非零 `--roll-deg` 会报错。
+全零 roll 跳过 quaternion 乘法，保持既有 boresight 数组字节；有非零值时整段向量化计算。
+RL-B 才接入 FYST 真实 roll；`data/` fixtures 仍保留 legacy 格式。
 
 ## 目录与阅读入口
 

@@ -22,6 +22,7 @@ from astropy.coordinates import solar_system_ephemeris
 from astropy.table import QTable
 from astropy.utils import iers
 
+from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.trajectory_h5 import (
     _check_sample_rate,
     _load_trajectory_block,
@@ -34,9 +35,7 @@ REPO = Path(__file__).resolve().parents[1]
 SAMPLE_ROOT = REPO / "data"
 # Optional pre-upgrade writer outputs (the source of data/); never committed samples.
 LEGACY_OUTPUT = REPO / "output" / "legacy"
-INPUT_ROOT = Path(
-    os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", LEGACY_OUTPUT)
-).resolve()
+INPUT_ROOT = Path(os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", LEGACY_OUTPUT)).resolve()
 CES_FILES = [f"ces/hdf5/fyst_ces_000_{i:03d}.h5" for i in range(3)]
 DAISY_FILES = [f"daisy/hdf5/fyst_daisy_{i:03d}_000.h5" for i in range(4)]
 SAMPLE_EXPECTATIONS = {
@@ -127,7 +126,7 @@ def assert_original_arrays_and_metadata(path):
     """h5py is the independent reference for native LoadHDF5 output."""
     block = _load_trajectory_block(path)
     with h5py.File(path, "r") as saved:
-        assert set(block.arrays) == set(FIELDS)
+        assert set(block.arrays) == {*FIELDS, schema.H5_BORESIGHT_ROLL}
         for key in FIELDS:
             expected = saved[f"shared/{key}"][()]
             actual = block.arrays[key]
@@ -166,7 +165,8 @@ def test_committed_arrays_and_metadata(sample_path):
     assert_original_arrays_and_metadata(sample_path)
 
 
-def test_committed_write_load_roundtrip(sample_path, tmp_path):
+@pytest.mark.parametrize("roll_mode", ["legacy", "legacy_nonzero", "zero", "ramp"])
+def test_committed_write_load_roundtrip(sample_path, tmp_path, roll_mode):
     """Rebuild writer input from committed original arrays, without local ECSV."""
     original = _load_trajectory_block(sample_path)
     arrays, info = original.arrays, original.trajectory_info
@@ -191,6 +191,20 @@ def test_committed_write_load_roundtrip(sample_path, tmp_path):
     # The fixture contains one block, so only the table slice becomes local.
     block = {**info["block"], "first": 0, "last": len(samples)}
     samples.meta.update(case=info["case"], start_utc=info["start_utc"], blocks=[block])
+    roll_deg = np.zeros(len(samples), dtype=np.float64)
+    scalar_roll_deg = 17.5 if roll_mode == "legacy_nonzero" else info["roll_deg"]
+    if roll_mode.startswith("legacy"):
+        roll_deg[:] = scalar_roll_deg
+    if roll_mode == "ramp":
+        roll_deg = np.linspace(-20.0, 30.0, len(samples))
+    source = schema.ROLL_SOURCE_LEGACY_SCALAR
+    if not roll_mode.startswith("legacy"):
+        samples[schema.ECSV_BORESIGHT_ROLL_DEG] = roll_deg * u.deg
+        source = (
+            "test_ramp" if roll_mode == "ramp" else schema.ROLL_SOURCE_PLACEHOLDER_ZERO
+        )
+        samples.meta[schema.ROLL_SOURCE_KEY] = source
+        samples.meta[schema.ROLL_CONVENTION_KEY] = schema.ROLL_CONVENTION
     with h5py.File(sample_path, "r") as saved:
         site_name = saved["instrument"].attrs["site_name"]
     # Bundled offline IERS suffices for this input-array / manifest test. Pointing
@@ -204,14 +218,29 @@ def test_committed_write_load_roundtrip(sample_path, tmp_path):
             height_m=original.source_site["height"].to_value(u.m),
             output_dir=tmp_path,
             source_sha256=info["source_sha256"],
-            roll_deg=info["roll_deg"],
+            roll_deg=scalar_roll_deg,
         )
     assert files == [sample_path.name]
     path = tmp_path / files[0]
     loaded = _load_trajectory_block(path)
     assert loaded.observation_name == original.observation_name
-    assert loaded.trajectory_info == {**info, "block": block}
-    assert set(loaded.arrays) == set(FIELDS)
+    expected_info = {
+        **info,
+        "block": block,
+        schema.ROLL_SOURCE_KEY: source,
+        schema.ROLL_CONVENTION_KEY: schema.ROLL_CONVENTION,
+    }
+    if not roll_mode.startswith("legacy"):
+        del expected_info["roll_deg"]
+    else:
+        expected_info["roll_deg"] = scalar_roll_deg
+    assert loaded.trajectory_info == expected_info
+    assert loaded.roll_source == source
+    assert loaded.roll_convention == schema.ROLL_CONVENTION
+    assert set(loaded.arrays) == {*FIELDS, schema.H5_BORESIGHT_ROLL}
+    np.testing.assert_array_equal(
+        loaded.arrays[schema.H5_BORESIGHT_ROLL], np.deg2rad(roll_deg)
+    )
     for key in FIELDS:
         assert loaded.arrays[key].dtype == arrays[key].dtype, key
         assert loaded.arrays[key].shape == arrays[key].shape, key
@@ -219,10 +248,118 @@ def test_committed_write_load_roundtrip(sample_path, tmp_path):
     with h5py.File(path, "r") as saved:
         manifest = loaded.source_shared_array_sha256
         assert manifest is not None
-        assert len(manifest) == 17
+        assert len(manifest) == 18
         assert set(manifest) == set(saved["shared"])
         for key, dataset in saved["shared"].items():
             assert hashlib.sha256(dataset[()].tobytes()).hexdigest() == manifest[key]
+        # Independent point-by-point oracle catches multiplication order and sign.
+        from toast import qarray as qa
+
+        q0 = qa.from_lonlat_angles(
+            -arrays["azimuth"], arrays["elevation"], np.zeros(len(samples))
+        )
+        expected = np.array(
+            [
+                qa.mult(q, qa.rotation([0.0, 0.0, 1.0], r))
+                for q, r in zip(q0, np.deg2rad(roll_deg))
+            ]
+        )
+        np.testing.assert_allclose(
+            saved["shared/boresight_azel"][()], expected, rtol=0, atol=1e-15
+        )
+        if not np.any(roll_deg):
+            assert saved["shared/boresight_azel"][()].tobytes() == q0.tobytes()
+
+
+@pytest.mark.parametrize(
+    "damage", ["length", "nan", "shape", "dtype", "missing_hash", "hash", "convention"]
+)
+def test_reject_bad_roll_h5(ces_path, tmp_path, damage):
+    path = tmp_path / "roll.h5"
+    shutil.copyfile(ces_path, path)
+    with h5py.File(path, "r+") as saved:
+        n = len(saved["shared/times"])
+        roll = np.zeros(n - 1 if damage == "length" else n, dtype=np.float64)
+        if damage == "nan":
+            roll[3] = np.nan
+        elif damage == "shape":
+            roll = roll[:, None]
+        elif damage == "dtype":
+            roll = roll.astype(np.float32)
+        ds = saved["shared"].create_dataset(schema.H5_BORESIGHT_ROLL, data=roll)
+        ds.attrs["comm_type"] = "column"
+        metadata = saved["metadata/other"].attrs
+        info = json.loads(metadata["trajectory_info"])
+        info[schema.ROLL_SOURCE_KEY] = schema.ROLL_SOURCE_PLACEHOLDER_ZERO
+        info[schema.ROLL_CONVENTION_KEY] = (
+            "unknown" if damage == "convention" else schema.ROLL_CONVENTION
+        )
+        metadata["trajectory_info"] = json.dumps(info)
+        refresh_manifest(saved)
+        if damage == "missing_hash":
+            manifest = json.loads(metadata["shared_array_sha256"])
+            del manifest[schema.H5_BORESIGHT_ROLL]
+            metadata["shared_array_sha256"] = json.dumps(manifest)
+        elif damage == "hash":
+            ds[3] = 1.0
+    match = (
+        schema.ROLL_CONVENTION_KEY
+        if damage == "convention"
+        else schema.H5_BORESIGHT_ROLL
+    )
+    with pytest.raises(ValueError, match=match):
+        _load_trajectory_block(path)
+
+
+def test_legacy_nonzero_roll(ces_path, tmp_path):
+    path = tmp_path / "legacy_roll.h5"
+    shutil.copyfile(ces_path, path)
+    with h5py.File(path, "r+") as saved:
+        metadata = saved["metadata/other"].attrs
+        info = json.loads(metadata["trajectory_info"])
+        info["roll_deg"] = 17.5
+        metadata["trajectory_info"] = json.dumps(info)
+    block = _load_trajectory_block(path)
+    assert block.roll_source == schema.ROLL_SOURCE_LEGACY_SCALAR
+    assert block.roll_convention == schema.ROLL_CONVENTION
+    np.testing.assert_array_equal(
+        block.arrays[schema.H5_BORESIGHT_ROLL], np.deg2rad(17.5)
+    )
+
+
+def test_writer_rejects_conflicting_roll(tmp_path, monkeypatch, capsys):
+    import runpy
+    import sys
+
+    samples = QTable({schema.ECSV_BORESIGHT_ROLL_DEG: np.zeros(3) * u.deg})
+    samples.meta.update(
+        {
+            schema.ROLL_SOURCE_KEY: schema.ROLL_SOURCE_PLACEHOLDER_ZERO,
+            schema.ROLL_CONVENTION_KEY: schema.ROLL_CONVENTION,
+        }
+    )
+    with pytest.raises(ValueError, match="non-default --roll-deg"):
+        write_trajectory_blocks(
+            samples,
+            site_name="unused",
+            latitude_deg=0,
+            longitude_deg=0,
+            height_m=0,
+            output_dir=tmp_path,
+            source_sha256="unused",
+            roll_deg=1,
+        )
+    source = tmp_path / "trajectory.ecsv"
+    samples.write(source)
+    (tmp_path / "schedule.ecsv").write_text("unused: rejected before reading schedule")
+    monkeypatch.setattr(
+        sys, "argv", ["save_trajectory_h5.py", str(source), "--roll-deg", "1"]
+    )
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(REPO / "scripts/save_trajectory_h5.py"), run_name="__main__")
+    assert error.value.code == 2
+    assert "non-default --roll-deg" in capsys.readouterr().err
+    assert not (tmp_path / "hdf5").exists()
 
 
 @pytest.mark.parametrize("relative", CES_FILES + DAISY_FILES)

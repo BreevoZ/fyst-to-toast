@@ -38,7 +38,7 @@ contract tests 是核对外部约定的例外。library 不改 MPI / 线程 / IE
 
 ## 生成与 ECSV 输入约定
 
-生成器目前提供 CES / Daisy，默认 scheduling window 为 10800 s，scheduler step
+生成器目前提供 CES / Daisy / Pong，默认 scheduling window 为 10800 s，scheduler step
 为 30 s，使用 `OverheadModel()` 默认值及原 legacy patch 参数；详见
 本地笔记 `docs/steps/06-generate-with-fyst.md`。science 数量受 overhead / 可见性影响，
 不能只按窗口时长推断。`scan_index` / `subscan_index` 保留 FYST 编号，不重新切块。
@@ -53,6 +53,9 @@ writer 接收生成器（或兼容的历史 exporter）保存的逐样本 QTable
   `block_time_s` 保留原 `Trajectory.times`，不能假定每块从零开始。
 - `az_deg` / `el_deg` 是 mount AltAz degree；两轴 `az_velocity` / `el_velocity`
   单位 deg/s。`scan_flag` 是 FYST enum，scan/subscan 为原始整数编号。
+- RL-A 新增 `boresight_roll_deg`：deg、float64、shape `(N,)`，当前生成器只填零；
+  metadata 新增 `roll_source="placeholder_zero"` 与
+  `roll_convention="toast_q0_rz_local_z_v1"`。真实 FYST roll 留到 RL-B。
 - metadata 的 `case` 用于命名，`start_utc` 为窗口起点，`source_schedule_sha256`
   必须与实际 schedule 文件字节一致。`blocks` 保留原顺序及完整 metadata：
   `[first,last)`、编号、native/requested timestep、nominal block 起止和实际首末 sample 等。
@@ -75,8 +78,19 @@ writer 调用原生 `SaveHDF5`，每 block 写
 `_TRAJECTORY_FIELDS` 唯一定义 loader 返回的 12 个输入字段：原始绝对 / 相对时间、
 Az/El 的 radian 与 degree 副本、deg/s 速度、FYST enum 及 scan/subscan 编号。
 writer 另外保存 `flags`、`boresight_azel`、`boresight_radec`、`position`、`velocity`，
-合计 **17 个 shared arrays**。TOAST `times` 为 Unix s，`azimuth` / `elevation` 为 rad；
+以及 `boresight_roll`（rad、float64、shape `(N,)`），合计 **18 个 shared arrays**。
+`_TRAJECTORY_ARRAY_FIELDS` 为原 12 字段加 roll，原 `_TRAJECTORY_FIELDS` 顺序保持不变。
+TOAST `times` 为 Unix s，`azimuth` / `elevation` 为 rad；
 `position` / `velocity` 是站点运动向量，不是 mount 角速度。
+
+roll 的字段名、metadata keys、来源标签与 convention 在 `trajectory_h5.py` 统一定义。
+`toast_q0_rz_local_z_v1` 表示 `Q0 = qa.from_lonlat_angles(-az, el, 0)`，右乘 local +Z
+的 `Rz(roll)`；必须明确单位、正号与乘法侧，不能直接把其他库的 rotation 当成同一角度。
+writer 有 ECSV roll 列时使用整段数组，要求上述 convention 与非空 `roll_source`；
+此时非零 `--roll-deg` 被 CLI / library 拒绝。无列时广播 scalar `--roll-deg` 并记为
+`legacy_scalar`。H5 `trajectory_info` 保存来源与 convention，legacy scalar 输入另保留
+`roll_deg`；新 per-sample 输入不保存一个可能误导的 scalar 值。
+`boresight_roll` 与其他 shared arrays 一起进入 manifest。
 
 `_TRAJECTORY_INFO_KEY` 对应 JSON `trajectory_info`：输入 hash、block、roll、sample rate
 等适配信息；`_SHARED_ARRAY_SHA256_KEY` 对应各 shared array 连续内存字节的 SHA-256。
@@ -89,6 +103,11 @@ CLI 的 `files.json` 列出本轮 H5，读取时用清单避免混入旧文件�
 - 要求恰好一个 Observation、12 个字段齐全且有限 / 一维 / 等长、`N >= 2`，合法 JSON
   与 `block.samples == N`，raw enum 属于 `{0,1,2,3}`；存在 hash manifest 时核对
   **全部已加载 shared arrays**。内容错误抛 `ValueError`，native IO 错误原样传播。
+- 额外返回 `boresight_roll`；已有字段必须为 float64、一维、长度 N、有限，并通过
+  manifest（若有）及 metadata convention / source 检查。旧 H5 无该字段时，从有限
+  `trajectory_info.roll_deg` 广播生成，不改原始 JSON / manifest；返回的 `roll_source`
+  为 `legacy_scalar`、`roll_convention` 为上述约定。无效 legacy scalar 由 loader 拒绝，
+  SimFYST override 不绕过文件校验。
 - 原样复制字段的 dtype / shape / bytes，不 wrap、重采样或再次切 block；返回
   `_TrajectoryBlock` 含数组、metadata / 原 JSON、hash manifest、site quantities 和时钟统计，
   不返回示意 focalplane。`finally` 清理临时 Data；frozen dataclass 不冻结数组内部。
@@ -124,11 +143,13 @@ fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS �
 - `_TRAJECTORY_FIELDS` 的全部 12 列保留原名 / dtype / shape / bytes，包括 times、Az、El，
   不 wrap、不 round、不转换原始 degree / radian 副本。标准 output name traits 可设别名，
   原始列仍保留；拒绝同名碰撞。默认新增两个 boresight quaternions 和 position / velocity，
-  加上 B2.3 的 shared flags，合计 17 个 shared columns。detdata 由 caller detectors 决定：
+  加上 B2.3 的 shared flags 和 RL-A 的 roll，合计 18 个 shared columns。detdata 由 caller detectors 决定：
   默认 float64 signal（K）和 uint8 flags，native allocator 全部清零；对应 name 为 None 时跳过。
-- boresight 使用 `qa.from_lonlat_angles(-az, el, 0)`；非零 roll **右乘**本地 z rotation，
-  与 SimGround 相同。`trajectory_boresight_angle=None` 使用 finite source `roll_deg`，
-  显式 angular Quantity 覆盖运行 roll；不改 source JSON，也不推断真实 Nasmyth 姿态。
+- boresight 使用 `qa.from_lonlat_angles(-az, el, 0)`；逐样本 roll **右乘**本地 +Z rotation。
+  writer 与 SimFYST 共用 `_boresight_with_roll`：整段全零时跳过乘法以保持 Q0 字节，
+  否则一次向量化处理全部 samples。`trajectory_boresight_angle=None` 使用 loader 返回的
+  roll 数组；显式有限 scalar angular Quantity 广播替换整段，shared `boresight_roll`
+  保存实际使用值，来源记为 `trajectory_boresight_angle`。不改 source JSON。
 - `azel_to_radec` 接收原 times、caller site 和 operator 的 use_ephem / use_qpoint /
   so3g_compat_mode。已执行默认 PyEphem 与 Astropy backend 测试；qpoint / so3g 未验收。
   `site.position_velocity(times)` 的单位是 **km、km/s**，与 mount rates 不同。
@@ -136,11 +157,12 @@ fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS �
 
 metadata 分开记录来源和当前计算：`trajectory_info` 为来源 JSON 原文；
 `source_shared_array_sha256` 为来源 manifest 的 JSON，不冒充当前输出 hashes；
-`simfyst_info` 是 JSON，记录 B2.3 contract、source basename / 整文件 SHA-256、N / 首末
-timestamp、rate check / clock residual、roll 与来源、caller telescope/site 名称、coordinate
+`simfyst_info` 是 JSON，`contract_version="RL-A"`，记录 source basename / 整文件 SHA-256、N / 首末
+timestamp、rate check / clock residual、`roll_source` / `roll_convention`、caller telescope/site 名称、coordinate
 backend 选项；`flags/intervals` 标明 motion 已派生、solar / directions 尚未派生，
 `flag_mapping` 记录 enum → 实际整数 mask，`class_counts` 记录 science / turnaround / invalid
-样本数。Shared arrays 本身无单位属性；示例打印契约单位，detdata 则带 native units。
+样本数。`roll_deg` 仅为常量数组的 scalar 摘要，随时间变化时为 null，实际值以 shared
+`boresight_roll` 为准。Shared arrays 本身无单位属性；示例打印契约单位，detdata 则带 native units。
 
 trajectory 分支创建 shared flags 及三个基础 motion intervals；不派生 solar / direction
 intervals，也不运行 AzimuthRanges。`_provides()` 声明 shared flags 和三个基础 intervals，
@@ -174,10 +196,12 @@ True runs，直接传给 `IntervalList(times, samplespans=...)`，不做时间�
 升级版本需重核。writer / loader 不派生这些 motion intervals；由 SimFYST trajectory 分支完成。
 
 writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAST longitude
-`-Az` 构造 boresight，`--roll-deg` 默认 0°，再调用 `azel_to_radec(..., use_ephem=True)`
+`-Az` 构造 boresight 并应用上述 roll，再调用 `azel_to_radec(..., use_ephem=True)`
 与 `site.position_velocity()`。IERS 表影响 pointing；复现时应选同一张表。
 真实 FYST focalplane / Nasmyth roll 尚未验收。`detdata=[]`，没有 detector signal、
 sky / atmosphere / noise simulation，也没有用独立 astrometry reference 验证 RA/Dec。
+旧 `tools/check_writer_roundtrip.py` 的 17 字段计数仅支持 legacy 输出；RL-A 新输出的
+writer / loader 契约由 `tests/test_trajectory_h5.py` 验证，旧工具尚待更新。
 
 后续是 **solar intervals** 与 **B3：方向区间**；多 block、Pong、MPI 和真实
 focalplane / roll 另行推进。
