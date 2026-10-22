@@ -123,13 +123,27 @@ writer 转为 H5 shared `boresight_roll`（rad、float64、每 sample 一个值�
 全零 roll 跳过 quaternion 乘法，保持既有 boresight 数组字节；有非零值时整段向量化计算。
 `data/` fixtures 仍保留 legacy 格式。
 
+## 全流程 walkthrough
+
+逐步重跑 生成 → H5 → 读回 → SimFYST，打印每个中间文件的内容，并用数值对照 FYST 与 TOAST
+在时间、Az 方向、flags、roll、intervals 上的约定差异；roll 部分比较一个偏轴 1° detector
+在四种 roll 输入下相对 FYST 的指向误差。图与 GIF 写到 `output/walkthrough/<case>/figures/`。
+
+```bash
+export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+python examples/03_pipeline_walkthrough.py            # 默认 daisy，含 walkthrough.gif
+python examples/03_pipeline_walkthrough.py ces --no-gif
+```
+
+该 example 为对照直接 import FYST；library 的依赖边界不变。
+
 ## 目录与阅读入口
 
 | 位置 | 用途 |
 |---|---|
 | `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 单 block trajectory operator |
 | `scripts/` | generate / save 两个 pipeline CLI |
-| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo |
+| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo；`03_pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照 |
 | `tools/`、`tests/`、[data/](data/README.md) | 手动检查、pytest、两份已提交 H5 fixtures |
 | [docs/architecture.md](docs/architecture.md) | 当前数据流与稳定契约 |
 | `docs/steps/`（仅本地） | 学习笔记与阅读顺序，不上传远端 |
