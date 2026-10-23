@@ -13,7 +13,7 @@ FYST read_timeline → schedule_to_trajectories
 scripts/save_trajectory_h5.py → trajectory_h5.write_trajectory_blocks
     ↓ TOAST SaveHDF5：每 native block 一个 Observation H5 + files.json
 trajectory_h5._load_trajectory_block → 校验并复制原始轨迹
-    ↓ SimFYST(trajectory_file=..., telescope=caller)：单 block geometry / motion classification
+    ↓ SimFYST(trajectory_file=... 或 trajectory_files=[...], telescope=caller)：每 block 一个 Observation
 TOAST Data.obs / Observation → 后续模拟 operators
 ```
 
@@ -28,7 +28,7 @@ TOAST Data.obs / Observation → 后续模拟 operators
 | `generate.py` | 唯一 import FYST 的运行模块；调用原生调度与重建，保存 ECSV 和 generation report |
 | `trajectory_h5.py` | 共用 ECSV / H5 定义、内存 QTable → H5 writer、私有单 block loader 与时钟检查 |
 | `fyst_flags.py` | 本地 plain-int enum；可选 contract tests 与 FYST 核对 |
-| `sim_fyst.py` | 保留 CES baseline；`trajectory_file` 提前分支，使用 caller Telescope 建 Observation |
+| `sim_fyst.py` | 保留 CES baseline；`trajectory_file` / `trajectory_files` 提前分支，使用 caller Telescope 串行建一个或多个 Observation |
 | `scripts/` | 参数、路径、覆盖保护、进程环境、离线 IERS 和 JSON 清单 |
 | `tools/` | 只读浏览及原生 LoadHDF5 roundtrip 验收，见 [工具说明](../tools/README.md) |
 
@@ -121,12 +121,21 @@ CLI 的 `files.json` 列出本轮 H5，读取时用清单避免混入旧文件�
   `abs(nominal-actual)/actual <= rtol`，返回两种 rate、relative error 和 rtol。
   允许微小频差不表示允许 gaps / jitter；不规则采样策略尚未实现。
 
-## SimFYST 单 block geometry / motion classification（B2.2–B2.3）
+## SimFYST 多 block geometry / motion classification（MB1）
 
-`trajectory_file=None` 保持原 schedule/CES 路径。提供文件时，`_exec()` 在任何 schedule
+`trajectory_file=None` 且 `trajectory_files=[]` 保持原 schedule/CES 路径。提供文件时，`_exec()` 在任何 schedule
 检查之前进入独立方法；既不读取 GroundSchedule，也不调用 CES / elnod generator。
 geometry 不按 pattern 分支，当前用已提交 CES（2611 samples）和 Daisy（399 samples）
 fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS 下载。
+
+单文件 `trajectory_file` 与列表 `trajectory_files` 互斥；列表可混用 H5 路径和 writer
+`files.json`，例如 `SimFYST(telescope=caller, trajectory_files=["run/hdf5/files.json"])`。
+清单按原顺序展开，相对路径以清单目录为基准，不支持 glob、目录或嵌套清单。
+第一遍加载并校验所有 block（仅保留 numpy 副本与 metadata，loader 已清理临时 Data）：
+解析后的路径与 Observation name 必须唯一，闭区间 `[times[0], times[-1]]` 不可重叠，
+每块均须通过 site / rate 校验。允许不同 source_sha256 的生成 run 混合。
+第二遍按首样本时间升序调用同一个单 block 构造方法；失败时清理本次所有 Observation，
+使 `data.obs` 恢复为空，重新抛出异常。单文件复用相同路径，metadata 内容不变。
 
 - 必须显式提供有非空 Focalplane 与 GroundSite 的 caller Telescope；与 schedule /
   schedule_file 互斥，不支持 telescope_file。source demo instrument 只用于 loader 读取，
@@ -142,7 +151,7 @@ fixtures 验收。运行环境由 caller 配置，示例与 tests 禁止 IERS �
 - 使用 `Observation(comm, caller_telescope, N, process_rows=1, sample_sets=[[N]], ...)`。
   name 来自 source Observation，Observation / Session UID 都用 `name_UID(name)`；Session
   首末是原 timestamp 转 UTC datetime，shared times 保留完整原始 float64 精度。
-  校验 / 构造失败不会 append 半成品；已分配 Observation 用 native `clear()` 清理。
+  校验失败不构造 Observation；构造失败用 native `clear()` 清理已分配对象并撤回全部 append。
 - `_TRAJECTORY_FIELDS` 的全部 12 列保留原名 / dtype / shape / bytes，包括 times、Az、El，
   不 wrap、不 round、不转换原始 degree / radian 副本。标准 output name traits 可设别名，
   原始列仍保留；拒绝同名碰撞。默认新增两个 boresight quaternions 和 position / velocity，
@@ -165,7 +174,8 @@ timestamp、rate check / clock residual、`roll_source` / `roll_convention`、ca
 backend 选项；`flags/intervals` 标明 motion 已派生、solar / directions 尚未派生，
 `flag_mapping` 记录 enum → 实际整数 mask，`class_counts` 记录 science / turnaround / invalid
 样本数。`roll_deg` 仅为常量数组的 scalar 摘要，随时间变化时为 null，实际值以 shared
-`boresight_roll` 为准。Shared arrays 本身无单位属性；示例打印契约单位，detdata 则带 native units。
+`boresight_roll` 为准。仅多文件模式新增 `trajectory_input_index`，为清单展开后的 0-based 输入序号；
+各 Observation 分别记录自己的来源。Shared arrays 本身无单位属性；示例打印契约单位，detdata 则带 native units。
 
 trajectory 分支创建 shared flags 及三个基础 motion intervals；不派生 solar / direction
 intervals，也不运行 AzimuthRanges。`_provides()` 声明 shared flags 和三个基础 intervals，
@@ -206,6 +216,6 @@ writer 用 native `fake_hexagon_focalplane` 的五个示意 detectors，按 TOAS
 astrometry reference 验证 RA/Dec。`tools/check_writer_roundtrip.py` 兼容新（18 个）和
 legacy（17 个）shared arrays。
 
-后续是 **solar intervals** 与 **B3：方向区间**；多 block、MPI 和真实 focalplane 另行推进。
+后续是 **solar intervals** 与 **B3：方向区间**；MPI 和真实 focalplane 另行推进。
 Daisy 高 El 的上游 acceleration warnings 仍未解决，历史现象及限制见 W2；
 CES / Daisy 串行 IO 通过不代表所有 patterns 或运动约束已经验收。

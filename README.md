@@ -3,10 +3,10 @@
 将 FYST trajectory 转为 TOAST Observation 的独立研究 package：FYST 决定运动，
 TOAST 使用逐样本轨迹。安装名称为 `fyst-to-toast`，import 名称为 `fyst_to_toast`。
 
-**B2.3 已实现：`SimFYST` 从一个 native trajectory H5 block 创建使用 caller Telescope
-的 Observation，保留原始轨迹、计算 geometry，并从 FYST enum 派生 shared flags 和
-scanning / turnaround / fyst_invalid intervals。** CES / Daisy 均可输入；未提供
-`trajectory_file` 时仍走原 CES baseline。solar intervals、方向区间（B3）、真实仪器
+**MB1 已实现：`SimFYST` 一次读取一个或多个 native trajectory H5，每个 block 创建一个
+使用 caller Telescope 的 Observation，保留原始轨迹、计算 geometry，并从 FYST enum 派生
+shared flags 和 scanning / turnaround / fyst_invalid intervals。** CES / Daisy 均可输入；
+未设置 `trajectory_file` / `trajectory_files` 时仍走原 CES baseline。solar intervals、方向区间（B3）、真实仪器
 及 sky / noise simulation 留待后续。
 
 ## 安装与运行环境
@@ -82,7 +82,7 @@ python examples/01_ces_baseline.py --output-dir "$RUN_DIR/ces_baseline"
 `SimFYST` 的 Observation，不使用生成的 FYST trajectory。数据约定与限制见
 [architecture](docs/architecture.md)。
 
-## 单 block SimFYST 教学示例
+## SimFYST trajectory 用法与教学示例
 
 直接使用已提交 fixture，无需重新生成轨迹：
 
@@ -104,7 +104,19 @@ FYST science → 0、turnaround → turnaround_mask（默认 4）、unclassified
 （默认 1）。三个 motion intervals 从原 enum 的整数 `[first,last)` spans 创建；示例打印
 实际映射、各类样本数和区间，不使用存在端点 bug 的 IntervalList 集合运算。
 
-library 用法为 `SimFYST(telescope=caller_telescope, trajectory_file=str(path)).apply(data)`，
+单文件用法为 `SimFYST(telescope=caller_telescope, trajectory_file=str(path)).apply(data)`。
+多文件可直接传 H5 路径列表，或 writer 的清单：
+
+```python
+SimFYST(telescope=caller_telescope, trajectory_files=["output/generated/daisy/hdf5/files.json"]).apply(data)
+```
+
+两个输入参数互斥；清单内路径相对清单目录解析，不支持 glob 或目录。先校验所有文件的
+路径 / Observation name 唯一、样本时间区间不重叠及下述 site / rate 条件，再按首样本时间
+升序构建；任一失败全部撤回，`data.obs` 保持为空。允许混合不同生成 run，每个 Observation
+保留自己的来源，另记 `simfyst_info.trajectory_input_index`（清单展开后从 0 开始的输入序号）。
+旧单文件 metadata 不变。
+
 要求空 `Data`、串行、caller site 与 source site 的 Cartesian 距离 ≤1 mm；caller sample
 rate 与实际时钟相对误差 ≤1e-6，不重采样。`trajectory_boresight_angle=None` 使用来源
 per-sample roll；显式 scalar angle Quantity 广播覆盖整段并记录来源。weather、HWP、detector filtering /
@@ -141,7 +153,7 @@ python examples/03_pipeline_walkthrough.py ces --no-gif
 
 | 位置 | 用途 |
 |---|---|
-| `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 单 block trajectory operator |
+| `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 串行多 block trajectory operator |
 | `scripts/` | generate / save 两个 pipeline CLI |
 | `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo；`03_pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照 |
 | `tools/`、`tests/`、[data/](data/README.md) | 手动检查、pytest、两份已提交 H5 fixtures |

@@ -3,7 +3,7 @@
 # a BSD-style license that can be found in the LICENSE file.
 # TOAST's LICENSE and AUTHORS for this file are in LICENSES/TOAST-BSD-2-Clause.txt and LICENSES/TOAST-AUTHORS.txt.
 
-# CES path copied unchanged from TOAST SimGround; optional single-block trajectory path.
+# CES path copied unchanged from TOAST SimGround; optional trajectory-file path.
 # Source: hpc4cmb/toast 9595449a,
 # src/toast/ops/sim_ground.py (sha256 eff1ac3ad41a9095670ba5357903581a4da01b1c6a75c37f8f236aef2cf2c4df).
 
@@ -98,9 +98,9 @@ def _mask_to_sample_spans(mask):
 class SimFYST(Operator):
     """Simulate a generic ground-based telescope scanning.
 
-    With trajectory_file, use one native block and the caller's Telescope to build
-    time / geometry and motion flags / intervals from the original FYST enum.
-    Without trajectory_file, the original schedule-based CES behavior follows.
+    With trajectory_file or trajectory_files, use native blocks and the caller's
+    Telescope to build time / geometry and motion flags / intervals from FYST.
+    Without trajectory inputs, the original schedule-based CES behavior follows.
 
     This simulates ground-based pointing in constant elevation scans for a telescope
     located at a particular site and using an pre-created schedule.
@@ -122,6 +122,10 @@ class SimFYST(Operator):
 
     trajectory_file = Unicode(
         None, allow_none=True, help="One native trajectory block in a writer HDF5 file"
+    )
+
+    trajectory_files = List(
+        [], help="Trajectory HDF5 paths or writer files.json manifests; serial only"
     )
 
     trajectory_boresight_angle = Quantity(
@@ -516,7 +520,7 @@ class SimFYST(Operator):
 
     @function_timer
     def _exec(self, data, detectors=None, **kwargs):
-        if self.trajectory_file is not None:
+        if self.trajectory_file is not None or self.trajectory_files:
             return self._exec_trajectory(data, detectors=detectors)
 
         log = Logger.get()
@@ -1307,6 +1311,8 @@ class SimFYST(Operator):
 
     def _validate_trajectory_config(self, data, detectors):
         """Reject unsupported settings before loading or allocating an observation."""
+        if self.trajectory_file is not None and self.trajectory_files:
+            raise ValueError("trajectory_file and trajectory_files are mutually exclusive")
         if self.schedule is not None or self.schedule_file is not None:
             raise ValueError(
                 "trajectory_file is mutually exclusive with schedule/schedule_file"
@@ -1408,10 +1414,53 @@ class SimFYST(Operator):
         if not 0 <= self.turnaround_mask <= np.iinfo(np.uint8).max:
             raise ValueError("trajectory turnaround_mask must fit uint8 (0..255)")
 
-    def _exec_trajectory(self, data, detectors=None):
-        """Build geometry and motion classification from one block for the caller."""
-        self._validate_trajectory_config(data, detectors)
-        source = Path(self.trajectory_file).expanduser().resolve()
+    def _trajectory_sources(self):
+        """Expand one level of writer manifests, preserving their listed order."""
+        if self.trajectory_file is not None:
+            # Preserve the original single-file path and native IO errors.
+            return [Path(self.trajectory_file).expanduser().resolve()]
+
+        def file_path(entry, parent=None):
+            try:
+                path = Path(entry).expanduser()
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"Invalid trajectory path {entry!r}") from error
+            if any(char in str(path) for char in "*?[]"):
+                raise ValueError(f"{path}: trajectory paths do not support glob patterns")
+            if parent is not None and not path.is_absolute():
+                path = parent / path
+            path = path.resolve()
+            if not path.is_file():
+                raise ValueError(f"{path}: expected a trajectory file, not a directory or missing path")
+            return path
+
+        sources = []
+        seen = set()
+        for entry in self.trajectory_files:
+            path = file_path(entry)
+            if path.suffix.lower() == ".json":
+                try:
+                    names = json.loads(path.read_text())
+                except (OSError, ValueError) as error:
+                    raise ValueError(f"{path}: cannot read trajectory manifest: {error}") from error
+                if not isinstance(names, list) or not names or any(
+                    not isinstance(name, str) or not name.strip() for name in names
+                ):
+                    raise ValueError(f"{path}: expected a non-empty JSON list of HDF5 paths")
+                expanded = [file_path(name, path.parent) for name in names]
+                if any(source.suffix.lower() == ".json" for source in expanded):
+                    raise ValueError(f"{path}: nested JSON manifests are not supported")
+            else:
+                expanded = [path]
+            for source in expanded:
+                if source in seen:
+                    raise ValueError(f"{source}: duplicate trajectory path")
+                seen.add(source)
+                sources.append(source)
+        return sources
+
+    def _load_validate_trajectory(self, source):
+        """Keep only validated input arrays and small metadata, not Observations."""
         block = _load_trajectory_block(source)
         telescope = self.telescope
         site = telescope.site
@@ -1431,15 +1480,69 @@ class SimFYST(Operator):
             block.actual_rate_hz,
             rtol=1e-6,
         )
-        if self.trajectory_boresight_angle is None:
+        roll_override = None
+        if self.trajectory_boresight_angle is not None:
+            roll_override = self.trajectory_boresight_angle.to_value(u.rad)
+            if np.ndim(roll_override) != 0 or not np.isfinite(roll_override):
+                raise ValueError(f"{ROLL_SOURCE_OVERRIDE} must be a finite scalar angle")
+        return {
+            "source": source,
+            "block": block,
+            "rate_check": rate_check,
+            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "roll_override": roll_override,
+        }
+
+    def _exec_trajectory(self, data, detectors=None):
+        """Validate every input first; then build all observations or roll back."""
+        self._validate_trajectory_config(data, detectors)
+        multiple = bool(self.trajectory_files)
+        prepared, names = [], {}
+        for index, source in enumerate(self._trajectory_sources()):
+            try:
+                item = self._load_validate_trajectory(source)
+            except Exception as error:
+                if not multiple:
+                    raise
+                raise ValueError(f"{source}: {error}") from error
+            name = item["block"].observation_name
+            if name in names:
+                raise ValueError(
+                    f"{source}: duplicate observation name {name!r}, also in {names[name]}"
+                )
+            names[name] = source
+            if multiple:
+                item["input_index"] = index
+            prepared.append(item)
+
+        prepared.sort(key=lambda item: item["block"].arrays["times"][0])
+        for previous, current in zip(prepared, prepared[1:]):
+            if current["block"].arrays["times"][0] <= previous["block"].arrays["times"][-1]:
+                raise ValueError(
+                    f"{current['source']}: sample time interval overlaps {previous['source']}"
+                )
+        try:
+            for item in prepared:
+                self._build_trajectory_observation(data, **item)
+        except Exception:
+            for observation in data.obs:
+                observation.clear()
+            data.obs.clear()
+            raise
+
+    def _build_trajectory_observation(
+        self, data, source, block, rate_check, source_sha256, roll_override,
+        input_index=None,
+    ):
+        """Shared single-block construction after input validation (serial only)."""
+        telescope = self.telescope
+        site = telescope.site
+        if roll_override is None:
             roll_source = block.roll_source
             roll_rad = block.arrays[H5_BORESIGHT_ROLL]
         else:
             roll_source = ROLL_SOURCE_OVERRIDE
-            scalar = self.trajectory_boresight_angle.to_value(u.rad)
-            if np.ndim(scalar) != 0 or not np.isfinite(scalar):
-                raise ValueError(f"{roll_source} must be a finite scalar angle")
-            roll_rad = np.full(len(block.arrays["times"]), scalar, dtype=np.float64)
+            roll_rad = np.full(len(block.arrays["times"]), roll_override, dtype=np.float64)
 
         times, az, el = (block.arrays[key] for key in _TRAJECTORY_FIELDS[:3])
         position, velocity = site.position_velocity(times)
@@ -1460,7 +1563,7 @@ class SimFYST(Operator):
         info = {
             "contract_version": "RL-A",
             "source_file": source.name,
-            "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "source_sha256": source_sha256,
             "samples": len(times),
             "first_time_unix_s": float(times[0]),
             "last_time_unix_s": float(times[-1]),
@@ -1486,6 +1589,8 @@ class SimFYST(Operator):
                 SCAN_FLAG_RETUNE: int(defaults.shared_mask_invalid),
             },
         }
+        if input_index is not None:
+            info["trajectory_input_index"] = input_index
         ob = Observation(
             data.comm,
             telescope,
@@ -1556,11 +1661,11 @@ class SimFYST(Operator):
                 block.source_shared_array_sha256
             )
             ob["simfyst_info"] = json.dumps(info, sort_keys=True, allow_nan=False)
+            # No partially constructed observation is exposed to the caller.
+            data.obs.append(ob)
         except Exception:
             ob.clear()
             raise
-        # No partially constructed observation is ever exposed to the caller.
-        data.obs.append(ob)
 
     def _finalize(self, data, **kwargs):
         return
@@ -1569,7 +1674,7 @@ class SimFYST(Operator):
         return dict()
 
     def _provides(self):
-        if self.trajectory_file is not None:
+        if self.trajectory_file is not None or self.trajectory_files:
             return {
                 "shared": list(
                     dict.fromkeys(

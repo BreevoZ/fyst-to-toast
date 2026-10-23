@@ -694,3 +694,223 @@ def test_custom_motion_output_names_and_mask(source, data):
     assert set(op.provides()["intervals"]) == set(obs.intervals) - {
         "ALL_OBSERVATION_SAMPLES"
     }
+
+
+MULTI_FIXTURES = [SAMPLES / "fyst_ces_000_001.h5", SAMPLES / "fyst_daisy_003_000.h5"]
+
+
+@pytest.fixture
+def multi_telescope():
+    with h5py.File(MULTI_FIXTURES[0], "r") as saved:
+        return caller(SimpleNamespace(site=dict(saved["instrument"].attrs)))
+
+
+def observation_snapshot(obs):
+    """Capture native array bytes, including IntervalList's structured records."""
+    def array_record(array):
+        return array.dtype, array.shape, array.tobytes()
+
+    return {
+        "shared": {key: array_record(obs.shared[key].data) for key in obs.shared},
+        "detdata": {key: array_record(obs.detdata[key].data) for key in obs.detdata},
+        "intervals": {key: array_record(obs.intervals[key].data) for key in obs.intervals},
+        "session": (obs.session.name, obs.session.uid, obs.session.start, obs.session.end),
+        "trajectory_info": obs["trajectory_info"],
+        "source_shared_array_sha256": obs["source_shared_array_sha256"],
+    }
+
+
+@pytest.mark.parametrize("input_kind", ["paths", "manifest", "mixed"])
+def test_multi_matches_individual_apply(multi_telescope, data, tmp_path, input_kind):
+    paths = MULTI_FIXTURES
+    entries = list(paths)
+    if input_kind != "paths":
+        folder = tmp_path / "inputs"
+        folder.mkdir()
+        paths = [folder / path.name for path in MULTI_FIXTURES]
+        for original, copied in zip(MULTI_FIXTURES, paths, strict=True):
+            shutil.copyfile(original, copied)
+        manifest = tmp_path / "files.json"
+        listed = paths if input_kind == "manifest" else paths[:1]
+        manifest.write_text(json.dumps([str(path.relative_to(tmp_path)) for path in listed]))
+        entries = [manifest] if input_kind == "manifest" else [manifest, paths[1]]
+    expected, metadata, inputs = {}, {}, {}
+    for index, path in enumerate(paths):
+        single = Data(Comm(world=None))
+        try:
+            SimFYST(telescope=multi_telescope, trajectory_file=str(path)).apply(single)
+            obs = single.obs[0]
+            expected[obs.name] = observation_snapshot(obs)
+            metadata[obs.name] = json.loads(obs["simfyst_info"])
+            assert "trajectory_input_index" not in metadata[obs.name]
+            inputs[obs.name] = index
+        finally:
+            single.clear()
+    op = SimFYST(telescope=multi_telescope, trajectory_files=entries)
+    op.apply(data)
+    assert [obs.name for obs in data.obs] == ["fyst_daisy_003_000", "fyst_ces_000_001"]
+    assert len({json.loads(obs["trajectory_info"])["source_sha256"] for obs in data.obs}) == 2
+    for obs in data.obs:
+        assert observation_snapshot(obs) == expected[obs.name]
+        info = json.loads(obs["simfyst_info"])
+        assert info.pop("trajectory_input_index") == inputs[obs.name]
+        assert info == metadata[obs.name]
+        assert set(op.provides()["shared"]) == set(obs.shared)
+        assert set(op.provides()["detdata"]) == set(obs.detdata)
+        assert set(op.provides()["intervals"]) == set(obs.intervals) - {"ALL_OBSERVATION_SAMPLES"}
+
+
+def test_trajectory_inputs_mutually_exclusive(multi_telescope, data):
+    with pytest.raises(ValueError, match="trajectory_file and trajectory_files.*exclusive"):
+        SimFYST(telescope=multi_telescope, trajectory_file=str(MULTI_FIXTURES[0]),
+                trajectory_files=[str(MULTI_FIXTURES[1])]).apply(data)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize("defect", ["name", "overlap", "touching", "path", "symlink", "corrupt", "site", "rate"])
+def test_multi_validation_is_atomic(multi_telescope, data, tmp_path, monkeypatch, defect):
+    first = MULTI_FIXTURES[1]
+    bad = tmp_path / f"bad_{defect}.h5"
+    if defect == "corrupt":
+        bad.write_bytes(b"not an HDF5 file")
+    elif defect == "path":
+        bad = first.parent / "." / first.name
+    elif defect == "symlink":
+        bad.symlink_to(first)
+    else:
+        original = first if defect in ("name", "overlap", "touching") else MULTI_FIXTURES[0]
+        shutil.copyfile(original, bad)
+        with h5py.File(bad, "r+") as saved:
+            if defect in ("overlap", "touching"):
+                saved.attrs["observation_name"] = "different-name"
+            if defect == "site":
+                saved["instrument"].attrs["site_alt_m"] += 0.002
+            if defect in ("touching", "rate"):
+                times = saved["shared/times"][()]
+                if defect == "touching":
+                    times += times[-1] - times[0]
+                else:
+                    times = times[0] + (times - times[0]) / 2
+                saved["shared/times"][:] = times
+                attrs = saved["metadata/other"].attrs
+                manifest = json.loads(attrs["shared_array_sha256"])
+                manifest["times"] = hashlib.sha256(times.tobytes()).hexdigest()
+                attrs["shared_array_sha256"] = json.dumps(manifest)
+        # The adversarial file itself is valid, so failures target cross-file/caller checks.
+        _load_trajectory_block(bad)
+    build = Mock(side_effect=AssertionError("must validate all files before building"))
+    monkeypatch.setattr(SimFYST, "_build_trajectory_observation", build)
+    with pytest.raises(ValueError) as error:
+        SimFYST(telescope=multi_telescope, trajectory_files=[first, bad]).apply(data)
+    assert bad.resolve().name in str(error.value)
+    expected = {"name": "duplicate observation name", "overlap": "overlaps", "touching": "overlaps",
+                "path": "duplicate trajectory path", "symlink": "duplicate trajectory path",
+                "site": "1 mm", "rate": "Nominal sample rate"}
+    if defect in expected:
+        assert expected[defect] in str(error.value)
+    build.assert_not_called()
+    assert data.obs == []
+
+
+@pytest.mark.parametrize("content", ["{", "{}", "[]", '[""]', "[7]", '["missing.h5"]', '["files.json"]'])
+def test_bad_trajectory_manifest(multi_telescope, data, tmp_path, content):
+    path = tmp_path / "files.json"
+    path.write_text(content)
+    with pytest.raises(ValueError) as error:
+        SimFYST(telescope=multi_telescope, trajectory_files=[path]).apply(data)
+    assert ("missing.h5" if content == '["missing.h5"]' else "files.json") in str(error.value)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize("entry", ["directory", "*.h5"])
+def test_multi_rejects_directory_and_glob(multi_telescope, data, tmp_path, entry):
+    path = tmp_path if entry == "directory" else tmp_path / entry
+    with pytest.raises(ValueError, match="directory|glob"):
+        SimFYST(telescope=multi_telescope, trajectory_files=[path]).apply(data)
+    assert data.obs == []
+
+
+@pytest.mark.parametrize("mode", ["data", "mpi", "schedule"])
+def test_multi_config_constraints(multi_telescope, data, mode):
+    options = {"telescope": multi_telescope, "trajectory_files": MULTI_FIXTURES}
+    if mode == "data":
+        data.obs.append(object())
+    elif mode == "mpi":
+        data = SimpleNamespace(obs=[], comm=SimpleNamespace(
+            comm_world=None, comm_group=None, world_size=2, group_size=1, ngroups=1))
+    else:
+        options["schedule_file"] = "not-used.ecsv"
+    before = list(data.obs)
+    try:
+        with pytest.raises(ValueError, match="empty data.obs|serial|schedule"):
+            SimFYST(**options)._exec(data)
+        assert data.obs == before
+    finally:
+        data.obs.clear()
+
+
+@pytest.mark.parametrize("failure_stage", ["constructor", "allocation"])
+def test_multi_build_failure_rolls_back(multi_telescope, data, monkeypatch, failure_stage):
+    original = sim_fyst.Observation
+    created = []
+    failure = RuntimeError("second observation failure")
+
+    def failing_observation(*args, **kwargs):
+        if created:
+            assert data.obs == [created[0]]
+            if failure_stage == "constructor":
+                raise failure
+        obs = original(*args, **kwargs)
+        monkeypatch.setattr(obs, "clear", Mock(wraps=obs.clear))
+        if created:
+            monkeypatch.setattr(obs.detdata, "ensure", Mock(side_effect=failure))
+        created.append(obs)
+        return obs
+
+    monkeypatch.setattr(sim_fyst, "Observation", failing_observation)
+    with pytest.raises(RuntimeError) as error:
+        SimFYST(telescope=multi_telescope, trajectory_files=MULTI_FIXTURES).apply(data)
+    assert error.value is failure
+    assert data.obs == []
+    assert len(created) == (1 if failure_stage == "constructor" else 2)
+    for obs in created:
+        obs.clear.assert_called_once()
+        # Native clear releases buffers but retains shared field descriptors.
+        assert all(obs.shared[key].data is None for key in obs.shared)
+        assert len(obs.detdata) == len(obs.intervals) == 0
+
+
+def test_generated_schedule_multiple_blocks(data, tmp_path):
+    pytest.importorskip("fyst_trajectories", exc_type=ImportError)
+    from astropy.table import QTable
+    from fyst_to_toast.generate import generate_trajectory
+
+    with solar_system_ephemeris.set("builtin"):
+        report = generate_trajectory("daisy", tmp_path, duration_s=5400)
+        assert report["status"] == "complete"
+        source = tmp_path / "fyst_trajectory.ecsv"
+        samples = QTable.read(source)
+        site = QTable.read(tmp_path / "schedule.ecsv").meta
+        folder = tmp_path / "hdf5"
+        folder.mkdir()
+        names = schema.write_trajectory_blocks(
+            samples, site_name=str(site["site_name"]),
+            latitude_deg=site["site_lat"].to_value(u.deg),
+            longitude_deg=site["site_lon"].to_value(u.deg),
+            height_m=site["site_alt"].to_value(u.m), output_dir=folder,
+            source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        )
+        # The library writer returns names; the CLI normally serializes this manifest.
+        manifest = folder / "files.json"
+        manifest.write_text(json.dumps(names))
+        with h5py.File(folder / names[0], "r") as saved:
+            telescope = caller(SimpleNamespace(site=dict(saved["instrument"].attrs)))
+        SimFYST(telescope=telescope, trajectory_files=[manifest]).apply(data)
+    assert len(data.obs) == len(samples.meta["blocks"]) == len(report["science_blocks"]) >= 2
+    assert [obs.name for obs in data.obs] == [Path(name).stem for name in names]
+    for index, (obs, block) in enumerate(zip(data.obs, samples.meta["blocks"], strict=True)):
+        assert obs.n_local_samples == block["samples"]
+        part = samples[block["first"]:block["last"]]
+        np.testing.assert_array_equal(obs.shared["times"].data, part["timestamp_unix_s"].value)
+        np.testing.assert_array_equal(obs.shared["boresight_roll"].data, part["boresight_roll_deg"].to_value(u.rad))
+        assert json.loads(obs["simfyst_info"])["trajectory_input_index"] == index
