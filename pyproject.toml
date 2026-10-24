@@ -8,8 +8,8 @@ version = "0.1.0.dev0"
 description = "Feed FYST telescope trajectories into TOAST simulations"
 readme = "README.md"
 requires-python = ">=3.10"
-# sim_fyst.py is adapted from TOAST (BSD-2-Clause); everything else is BSD-3-Clause.
-license = "BSD-3-Clause AND BSD-2-Clause"
+# sim_fyst.py is adapted from TOAST (also BSD-2-Clause); its notice is in LICENSES/.
+license = "BSD-2-Clause"
 license-files = ["LICENSE", "LICENSES/*.txt"]
 dependencies = [
     "toast>=3.0.5,<4",

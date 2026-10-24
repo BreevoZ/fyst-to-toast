@@ -154,7 +154,7 @@ instrument calibration or agreement between independent astrometry backends.
 
 ## License
 
-This repository uses the [BSD-3-Clause license](LICENSE).
+This repository uses the [BSD-2-Clause license](LICENSE).
 [src/fyst_to_toast/sim_fyst.py](src/fyst_to_toast/sim_fyst.py) is adapted from
 TOAST SimGround under [BSD-2-Clause](LICENSES/TOAST-BSD-2-Clause.txt), with the
 [TOAST attribution](LICENSES/TOAST-AUTHORS.txt) retained.
