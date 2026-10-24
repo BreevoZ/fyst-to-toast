@@ -149,13 +149,28 @@ python examples/03_pipeline_walkthrough.py ces --no-gif
 
 该 example 为对照直接 import FYST；library 的依赖边界不变。
 
+## 下游冒烟测试
+
+`04` 将全部 trajectory blocks 接入原生 TOAST pointing / pixels / weights、合成天空与可选
+noise，再用 `CovarianceAndHits → BinMap` 输出 hits / I / Q / U FITS 和 PNG，同时核对无噪声 I 回收。
+CES 可与同 schedule 的 `SimGround` 比较 hits 足迹和 Observation 结构；其天空系 schedule roll
+被直接当 local roll 使用，所以不比较两边 Q/U 角度。
+默认输出 `output/downstream/<case>/`，重跑加 `--overwrite`；`--no-noise` 可关闭噪声。
+
+```bash
+export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+python examples/04_downstream_smoke.py ces --compare-simground
+python examples/04_downstream_smoke.py daisy
+python examples/04_downstream_smoke.py pong
+```
+
 ## 目录与阅读入口
 
 | 位置 | 用途 |
 |---|---|
 | `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 串行多 block trajectory operator |
 | `scripts/` | generate / save 两个 pipeline CLI |
-| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo；`03_pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照 |
+| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo；`03_pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照；`04_downstream_smoke.py` 下游模拟、binned map 与 SimGround 对照 |
 | `tools/`、`tests/`、[data/](data/README.md) | 手动检查、pytest、两份已提交 H5 fixtures |
 | [docs/architecture.md](docs/architecture.md) | 当前数据流与稳定契约 |
 | `docs/steps/`（仅本地） | 学习笔记与阅读顺序，不上传远端 |
