@@ -60,8 +60,8 @@ trajectory generator → 旧本地 example 的 `fyst_trajectory.ecsv` 与 `sched
 base commit 为 `2d0a3d395486fd4a43d83c8b38138e9b7bb6159b`；不是未修改的 release，
 **本次没有用 v0.10 重新生成**。`_iso_utc` / `_read_time` 的本地补丁支持带 `+00:00`
 的时间文本。补丁和来源文件 hash 见 本地 `docs/UPSTREAM.json` 与
-[历史 UTC patch](../docs/patches/fyst-timeline-utc_2d0a3d3.patch)。当前依赖 FYST 0.11.0
-已内置修复（见[补丁说明](../docs/patches/README.md)），不改变这些 fixtures 的历史来源。writer 源自旧本地
+历史 UTC patch。当前依赖 FYST 0.11.0
+已内置修复，不改变这些 fixtures 的历史来源。writer 源自旧本地
 working-tree example，并非 FYST upstream 已提交文件；原有 license / authors 记录
 见 [第三方代码与许可](../README.md#第三方代码与许可) 和 [LICENSES](../LICENSES)。
 

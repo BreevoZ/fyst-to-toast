@@ -18,7 +18,7 @@ from toast.ops.mapmaker_utils import CovarianceAndHits
 from fyst_to_toast.sim_fyst import SimFYST
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("downstream_example", ROOT / "examples/04_downstream_smoke.py")
+spec = importlib.util.spec_from_file_location("downstream_example", ROOT / "examples/downstream_maps.py")
 walk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(walk)
 

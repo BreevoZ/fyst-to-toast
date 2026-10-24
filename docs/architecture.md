@@ -17,7 +17,7 @@ trajectory_h5._load_trajectory_block → 校验并复制原始轨迹
 TOAST Data.obs / Observation → 后续模拟 operators
 ```
 
-另外，`examples/01_ces_baseline.py` 用同一 `GroundSchedule` / `Telescope` 分别运行
+另外，`examples/ces_baseline_vs_simground.py` 用同一 `GroundSchedule` / `Telescope` 分别运行
 原生 `SimGround` 与当前 `SimFYST`；两者仍自己生成 CES，不经过上述 trajectory 链。
 读取 schedule 成功不能证明逐样本运动保真。原生 `LoadHDF5` 恢复文件中的示意仪器与
 指向；`SimFYST` trajectory 分支使用调用者的仪器并重新计算 geometry，二者职责不同，
@@ -70,7 +70,7 @@ writer 接收生成器（或兼容的历史 exporter）保存的逐样本 QTable
   CES / Daisy 历史输入的精确 site 对照见 本地笔记 `docs/steps/03-fyst-import-boundary.md`。
 
 FYST v0.11.0 起 schedule 时间为毫秒加 `+00:00` 的 UTC 文本（修复已进入 upstream）；
-旧补丁、与 0.10 补丁版输出的差异和重建方式见 [补丁说明](patches/README.md)。
+0.10 时期的本地补丁已不再需要。
 
 ## H5 与 loader 契约
 
@@ -181,7 +181,7 @@ trajectory 分支创建 shared flags 及三个基础 motion intervals；不派�
 intervals，也不运行 AzimuthRanges。`_provides()` 声明 shared flags 和三个基础 intervals，
 保留实际提供的其他 shared / detdata；Observation 构造器自带的
 `ALL_OBSERVATION_SAMPLES` 仅描述全样本结构，不是扫描分类。见
-[教学示例](../examples/02_simfyst_trajectory.py) 与 [验收测试](../tests/test_sim_fyst_trajectory.py)。
+[教学示例](../examples/simfyst_from_h5.py) 与 [验收测试](../tests/test_sim_fyst_trajectory.py)。
 
 ## Flags、区间与科学边界
 

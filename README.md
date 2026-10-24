@@ -16,7 +16,7 @@ shared flags 和 scanning / turnaround / fyst_invalid intervals。** CES / Daisy
 FYST trajectories 0.11.x；writer / loader 不 import FYST。
 已验证环境为 TOAST 3.0.5、FYST 0.11.0（`c933b7a`，已内置 UTC offset 修复，无本地补丁）；
 版本范围不代表所有版本均已测试。历史补丁、实际导入路径与 pip metadata 的区别见
-[依赖重建说明](docs/patches/README.md)，本 repo 不自动修改依赖。
+依赖重建说明，本 repo 不自动修改依赖。
 
 在已有依赖的环境、repo 根目录做 editable install（不会安装或更新依赖）：
 
@@ -75,7 +75,7 @@ block = _load_trajectory_block(Path(os.environ["RUN_DIR"]) / "hdf5/fyst_ces_000_
 print(block.observation_name, len(block.arrays["times"]))
 print(_check_sample_rate(10.0, block.actual_rate_hz))
 PY
-python examples/01_ces_baseline.py --output-dir "$RUN_DIR/ces_baseline"
+python examples/ces_baseline_vs_simground.py --output-dir "$RUN_DIR/ces_baseline"
 ```
 
 最后一条是独立的 30 s、20 Hz、两 detector CES 教学对照：比较 `SimGround` 与
@@ -88,10 +88,10 @@ python examples/01_ces_baseline.py --output-dir "$RUN_DIR/ces_baseline"
 
 ```bash
 export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-python examples/02_simfyst_trajectory.py
+python examples/simfyst_from_h5.py
 python tools/h5reader.py output/simfyst/fyst_ces_000_001/fyst_ces_000_001.h5 --tree
 # 也可输入 Daisy；输出目录按 source Observation name 分开。
-python examples/02_simfyst_trajectory.py data/fyst_daisy_003_000.h5
+python examples/simfyst_from_h5.py data/fyst_daisy_003_000.h5
 python -m pytest tests -q
 ```
 
@@ -143,8 +143,8 @@ writer 转为 H5 shared `boresight_roll`（rad、float64、每 sample 一个值�
 
 ```bash
 export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-python examples/03_pipeline_walkthrough.py            # 默认 daisy，含 walkthrough.gif
-python examples/03_pipeline_walkthrough.py ces --no-gif
+python examples/pipeline_walkthrough.py            # 默认 daisy，含 walkthrough.gif
+python examples/pipeline_walkthrough.py ces --no-gif
 ```
 
 该 example 为对照直接 import FYST；library 的依赖边界不变。
@@ -159,9 +159,9 @@ CES 可与同 schedule 的 `SimGround` 比较 hits 足迹和 Observation 结构�
 
 ```bash
 export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
-python examples/04_downstream_smoke.py ces --compare-simground
-python examples/04_downstream_smoke.py daisy
-python examples/04_downstream_smoke.py pong
+python examples/downstream_maps.py ces --compare-simground
+python examples/downstream_maps.py daisy
+python examples/downstream_maps.py pong
 ```
 
 ## 目录与阅读入口
@@ -170,12 +170,11 @@ python examples/04_downstream_smoke.py pong
 |---|---|
 | `src/fyst_to_toast/` | `generate.py` 生成；`trajectory_h5.py` 共用字段、writer / loader；`fyst_flags.py` enum；`sim_fyst.py` CES / 串行多 block trajectory operator |
 | `scripts/` | generate / save 两个 pipeline CLI |
-| `examples/` | `01_ces_baseline.py` CES 对照；`02_simfyst_trajectory.py` caller instrument 教学 demo；`03_pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照；`04_downstream_smoke.py` 下游模拟、binned map 与 SimGround 对照 |
+| `examples/` | `ces_baseline_vs_simground.py` CES 对照；`simfyst_from_h5.py` caller instrument 教学 demo；`pipeline_walkthrough.py` 全流程与 FYST/TOAST 约定对照；`downstream_maps.py` 下游模拟、binned map 与 SimGround 对照 |
 | `tools/`、`tests/`、[data/](data/README.md) | 手动检查、pytest、两份已提交 H5 fixtures |
 | [docs/architecture.md](docs/architecture.md) | 当前数据流与稳定契约 |
 | `docs/steps/`（仅本地） | 学习笔记与阅读顺序，不上传远端 |
 | `docs/records/`（仅本地） | 2026-10-18 handoff / validation 历史快照，不上传远端 |
-| [docs/patches/](docs/patches/README.md) | FYST 依赖补丁与重建说明；来源 commit / 文件 hash 另记于本地 `docs/UPSTREAM.json` |
 | `output/` | 忽略的本机生成物和执行日志 |
 
 本地另有 `AGENTS.md` / `CLAUDE.md`（给 AI 的开发规则）、`docs/steps/`、`docs/records/` 和 `docs/UPSTREAM.json`，
@@ -185,8 +184,6 @@ python examples/04_downstream_smoke.py pong
 
 - [`src/fyst_to_toast/sim_fyst.py`](src/fyst_to_toast/sim_fyst.py) 来自 TOAST `SimGround`（hpc4cmb/toast `9595449a`，`src/toast/ops/sim_ground.py`），
   保留 BSD-2-Clause：[许可](LICENSES/TOAST-BSD-2-Clause.txt) / [作者](LICENSES/TOAST-AUTHORS.txt)。
-- `docs/patches/*.patch` 含 FYST 源码，保留 [FYST BSD-3-Clause](LICENSES/fyst-trajectories-BSD-3-Clause.txt)；
-  这些历史补丁不自动应用，当前依赖 FYST 0.11.0 无需补丁，详见补丁说明。
 - writer 源自用户的本地、当时未跟踪的 working-tree example，并非 FYST upstream
   已发布贡献；来源及原文件 hash 记录在本地 `docs/UPSTREAM.json`（不上传）。TOAST / FYST 仍是独立依赖。
   **用户自己的代码暂未声明许可：仓库保持私有期间保留所有权利（all rights reserved），分享前再决定许可。**

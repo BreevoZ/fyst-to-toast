@@ -35,3 +35,6 @@ CLAUDE.md
 docs/steps/
 docs/records/
 docs/UPSTREAM.json
+
+# Historical FYST patches (local only; FYST >= 0.11 includes the fix)
+docs/patches/
