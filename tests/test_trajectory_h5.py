@@ -1,4 +1,4 @@
-"""Committed samples always run; full writer outputs add optional coverage."""
+"""Writer and loader tests on the committed H5 samples and synthetic inputs."""
 
 import os
 
@@ -33,11 +33,6 @@ iers.conf.auto_download = False
 
 REPO = Path(__file__).resolve().parents[1]
 SAMPLE_ROOT = REPO / "data"
-# Optional pre-upgrade writer outputs (the source of data/); never committed samples.
-LEGACY_OUTPUT = REPO / "output" / "legacy"
-INPUT_ROOT = Path(os.environ.get("FYST_TO_TOAST_TEST_OUTPUT", LEGACY_OUTPUT)).resolve()
-CES_FILES = [f"ces/hdf5/fyst_ces_000_{i:03d}.h5" for i in range(3)]
-DAISY_FILES = [f"daisy/hdf5/fyst_daisy_{i:03d}_000.h5" for i in range(4)]
 SAMPLE_EXPECTATIONS = {
     "fyst_ces_000_001.h5": {
         "samples": 2611,
@@ -66,22 +61,9 @@ FIELDS = (
 )
 
 
-def input_path(relative):
-    """Only the optional full-output tests may skip for missing input."""
-    path = INPUT_ROOT / relative
-    if not path.is_file():
-        pytest.skip(
-            f"Writer H5 absent: {path}; set FYST_TO_TOAST_TEST_OUTPUT to supply it"
-        )
-    return path
-
-
 @pytest.fixture(scope="session", autouse=True)
 def protect_inputs_and_disable_network():
     paths = [SAMPLE_ROOT / name for name in SAMPLE_EXPECTATIONS]
-    # Protect local outputs too, even while the override points at an empty dir.
-    for root in (LEGACY_OUTPUT, INPUT_ROOT):
-        paths.extend(root / p for p in CES_FILES + DAISY_FILES)
     before = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths if p.is_file()
     }
@@ -362,11 +344,6 @@ def test_writer_rejects_conflicting_roll(tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "hdf5").exists()
 
 
-@pytest.mark.parametrize("relative", CES_FILES + DAISY_FILES)
-def test_optional_output_arrays_and_metadata(relative):
-    assert_original_arrays_and_metadata(input_path(relative))
-
-
 def test_committed_clock_and_nominal_rate(sample_path):
     expected = SAMPLE_EXPECTATIONS[sample_path.name]
     block = _load_trajectory_block(sample_path)
@@ -389,27 +366,6 @@ def test_committed_clock_and_nominal_rate(sample_path):
             _check_sample_rate(10, block.actual_rate_hz, rtol=1e-8)
     assert _check_sample_rate(10, 10, rtol=0)["relative_error"] == 0
     print(f"{sample_path.name}: flags={expected['flags']}; 10 Hz PASS, 20 Hz rejected")
-
-
-def test_optional_first_ces_clock_and_nominal_rate():
-    # Retain the original 850-sample case alongside the new default CES block.
-    block = _load_trajectory_block(input_path(CES_FILES[0]))
-    assert len(block.arrays["times"]) == 850
-    flags, counts = np.unique(block.arrays["fyst_scan_flag"], return_counts=True)
-    assert dict(zip(flags.tolist(), counts.tolist())) == {1: 830, 2: 20}
-    assert block.actual_rate_hz == pytest.approx(9.999997349033228, rel=0, abs=1e-12)
-    assert block.time_tolerance_s == 2 * np.spacing(abs(block.arrays["times"])).max()
-    numbers = _check_sample_rate(10, block.actual_rate_hz)
-    assert numbers["nominal_rate_hz"] == 10
-    assert numbers["actual_rate_hz"] == block.actual_rate_hz
-    assert numbers["relative_error"] == pytest.approx(2.65096747e-7)
-    assert numbers["rtol"] == 1e-6
-    with pytest.raises(ValueError, match="Nominal sample rate 20.*actual"):
-        _check_sample_rate(20, block.actual_rate_hz)
-    with pytest.raises(ValueError, match="rtol 1e-08"):
-        _check_sample_rate(10, block.actual_rate_hz, rtol=1e-8)
-    assert _check_sample_rate(10, 10, rtol=0)["relative_error"] == 0
-    print(f"CES flags={{1: 830, 2: 20}}; 10 Hz PASS, 20 Hz rejected; {numbers}")
 
 
 def test_ces_sweeps_and_complete_turnarounds(ces_path):

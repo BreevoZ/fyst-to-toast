@@ -23,16 +23,6 @@ pytest.importorskip(
 )
 
 REPO = Path(__file__).resolve().parents[1]
-SCHEDULE_ROOT = (
-    REPO
-    / Path(
-        os.environ.get(
-            "FYST_TO_TOAST_TEST_SCHEDULE_ROOT",
-            "../legacy_repo/fyst-trajectories-sandbox-2026-10/"
-            "examples/fyst_to_toast/output",
-        )
-    ).expanduser()
-).resolve()
 
 
 @pytest.mark.parametrize(
@@ -53,15 +43,22 @@ def test_scan_flag_contract(name):
 
 
 @pytest.mark.parametrize("case", ["ces", "daisy"])
-def test_legacy_site_contract(case):
+def test_writer_site_contract(case, tmp_path):
+    """The writer CLI reads the same site from a schedule header as FYST does."""
+    from astropy.time import Time
     from fyst_trajectories.overhead import read_timeline
 
-    schedule = SCHEDULE_ROOT / case / "schedule.ecsv"
-    if not schedule.is_file():
-        pytest.skip(
-            f"Legacy schedule absent: {schedule}; "
-            "set FYST_TO_TOAST_TEST_SCHEDULE_ROOT to supply it"
-        )
+    from fyst_to_toast.generate import (
+        DEFAULT_START,
+        build_legacy_patch,
+        generate_observing_timeline,
+        write_timeline_ecsv,
+    )
+
+    start = Time(DEFAULT_START[case], scale="utc", precision=3)
+    timeline = generate_observing_timeline(build_legacy_patch(case), start, 1800)
+    write_timeline_ecsv(timeline, tmp_path)
+    schedule = tmp_path / "full_timeline.ecsv"
     read_site_metadata = runpy.run_path(str(REPO / "scripts/save_trajectory_h5.py"))[
         "read_site_metadata"
     ]
