@@ -134,23 +134,19 @@ def reconstruct_trajectories(source, science):
     return science_timeline, pairs
 
 
-def toast_boresight_roll_deg(el_deg, site, instrument_rotation_deg=0.0):
-    """TOAST roll from FYST's mechanical rotation: -(s*El + instrument_rotation)."""
+def toast_boresight_roll_deg(el_deg, site):
+    """TOAST roll from FYST's Nasmyth rotation: -nasmyth_sign*El."""
     from fyst_trajectories import InstrumentOffset, compute_focal_plane_rotation
 
-    if not math.isfinite(instrument_rotation_deg):
-        raise ValueError("instrument_rotation_deg must be finite")
-    offset = InstrumentOffset(
-        dx=0.0, dy=0.0, instrument_rotation=instrument_rotation_deg
-    )
     # FYST +x is TOAST local -Y, so the same physical rotation has opposite sign.
     # Keep parallactic_angle=0: TOAST's azel_to_radec handles the sky rotation.
-    return -compute_focal_plane_rotation(el_deg, site=site, offset=offset)
+    # Module clocking belongs in focalplane detector quaternions, not roll.
+    return -compute_focal_plane_rotation(
+        el_deg, site=site, offset=InstrumentOffset(dx=0.0, dy=0.0)
+    )
 
 
-def build_trajectory_table(
-    case, science_timeline, pairs, source, instrument_rotation_deg=0.0
-):
+def build_trajectory_table(case, science_timeline, pairs, source):
     """Keep native arrays, units and half-open block slices; do not resample."""
     import numpy as np
     from astropy import units as u
@@ -181,7 +177,7 @@ def build_trajectory_table(
         chunk[schema.ECSV_BORESIGHT_ROLL_DEG] = (
             np.asarray(
                 toast_boresight_roll_deg(
-                    trajectory.el, science_timeline.site, instrument_rotation_deg
+                    trajectory.el, science_timeline.site
                 ),
                 dtype=np.float64,
             )
@@ -226,7 +222,6 @@ def build_trajectory_table(
         schema.ROLL_SOURCE_KEY: schema.ROLL_SOURCE_FYST,
         schema.ROLL_CONVENTION_KEY: schema.ROLL_CONVENTION,
         schema.ROLL_NASMYTH_PORT_KEY: science_timeline.site.nasmyth_port,
-        schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY: float(instrument_rotation_deg),
     }
     return samples
 
@@ -278,7 +273,6 @@ def generate_trajectory(
     *,
     start=None,
     duration_s=DEFAULT_DURATION_S,
-    instrument_rotation_deg=0.0,
     iers_file=None,
     overwrite=False,
 ):
@@ -287,14 +281,10 @@ def generate_trajectory(
     IERS / ephemeris configuration belongs to the caller. ``iers_file`` records
     the caller's selected table and hash; it does not install that table.
     With no science, only the full timeline and a no_science report are written.
-    ``instrument_rotation_deg`` is the finite mechanical mounting zero point;
-    the Nasmyth port comes from the written schedule.
     """
     import numpy as np
     from astropy.time import Time
 
-    if not math.isfinite(instrument_rotation_deg):
-        raise ValueError("instrument_rotation_deg must be finite")
     patch = build_legacy_patch(case)
     start = Time(start or DEFAULT_START[case], scale="utc", precision=3)
     folder = Path(output_dir).expanduser().resolve()
@@ -325,7 +315,7 @@ def generate_trajectory(
 
     science_timeline, pairs = reconstruct_trajectories(source, timeline.science_blocks)
     samples = build_trajectory_table(
-        case, science_timeline, pairs, source, instrument_rotation_deg
+        case, science_timeline, pairs, source
     )
     samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
     for summary, block in zip(

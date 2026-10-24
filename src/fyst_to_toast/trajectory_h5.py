@@ -38,7 +38,6 @@ H5_BORESIGHT_ROLL = "boresight_roll"
 ROLL_SOURCE_KEY = "roll_source"
 ROLL_CONVENTION_KEY = "roll_convention"
 ROLL_NASMYTH_PORT_KEY = "roll_nasmyth_port"
-ROLL_INSTRUMENT_ROTATION_DEG_KEY = "roll_instrument_rotation_deg"
 ROLL_CONVENTION = "toast_q0_rz_local_z_v1"
 ROLL_SOURCE_PLACEHOLDER_ZERO = "placeholder_zero"
 ROLL_SOURCE_FYST = "fyst_focal_plane_rotation"
@@ -86,7 +85,6 @@ TRAJECTORY_META_KEYS = (
     ROLL_SOURCE_KEY,
     ROLL_CONVENTION_KEY,
     ROLL_NASMYTH_PORT_KEY,
-    ROLL_INSTRUMENT_ROTATION_DEG_KEY,
 )
 
 TRAJECTORY_BLOCK_KEYS = (

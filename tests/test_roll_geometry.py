@@ -33,21 +33,21 @@ def test_zero_roll_skips_rotation(monkeypatch):
     assert rotation.call_args.args[1].shape == (3,)
 
 
-@pytest.mark.parametrize("port", ["right", "left"])
-@pytest.mark.parametrize("instrument_rotation_deg", [0.0, 17.0])
-def test_fyst_off_axis_roll_contract(port, instrument_rotation_deg):
+@pytest.mark.parametrize("port", ["right", "left", "cassegrain"])
+@pytest.mark.parametrize("clocking_deg", [0.0, 17.0])
+def test_fyst_off_axis_roll_contract(port, clocking_deg):
     fyst = pytest.importorskip("fyst_trajectories", exc_type=ImportError)
     site = replace(fyst.get_fyst_site(), nasmyth_port=port)
     az_deg = np.array([0.0, 45.0, 180.0, 270.0, 359.0])
     el_deg = np.array([25.0, 45.0, 60.0, 80.0, 35.0])
-    roll = np.deg2rad(
-        toast_boresight_roll_deg(el_deg, site, instrument_rotation_deg)
-    )
+    roll = np.deg2rad(toast_boresight_roll_deg(el_deg, site))
     bore = _boresight_with_roll(np.deg2rad(az_deg), np.deg2rad(el_deg), roll)
-    detector = xieta_to_quat(np.sin(np.deg2rad(1.0)), 0.0, 0.0)
+    q_fp = xieta_to_quat(np.sin(np.deg2rad(1.0)), 0.0, 0.0)
+    # Q_det = Q_bore * Rz(-clocking) * Q_fp.
+    detector = qa.mult(qa.rotation([0.0, 0.0, 1.0], -np.deg2rad(clocking_deg)), q_fp)
     actual = qa.rotate(qa.mult(bore, detector), [0.0, 0.0, 1.0])
     offset = fyst.InstrumentOffset(
-        dx=60.0, dy=0.0, instrument_rotation=instrument_rotation_deg
+        dx=60.0, dy=0.0, instrument_rotation=clocking_deg
     )
     rotation = fyst.compute_focal_plane_rotation(el_deg, site=site, offset=offset)
     det_az, det_el = fyst.boresight_to_detector(az_deg, el_deg, offset, rotation)
@@ -62,6 +62,6 @@ def test_fyst_off_axis_roll_contract(port, instrument_rotation_deg):
     error_arcsec = np.rad2deg(separation) * 3600
     assert np.max(error_arcsec) < 1.0
     print(
-        f"{port} Nasmyth, {instrument_rotation_deg=}: "
+        f"{port} Nasmyth, {clocking_deg=}: "
         f"max off-axis error {np.max(error_arcsec):.6g} arcsec"
     )

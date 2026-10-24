@@ -123,9 +123,9 @@ per-sample roll；显式 scalar angle Quantity 广播覆盖整段并记录来源
 splitting、修改运动的参数暂不支持；原 JSON 与 source hashes 单独保留。
 
 **RL-B 已填入逐样本真实 roll。** ECSV `boresight_roll_deg`（deg、float64）由 FYST 计算
-`ρ(t) = −(nasmyth_sign·El(t) + instrument_rotation)`；端口取自 schedule，
-`--instrument-rotation-deg` 默认 0，安装零角尚待仪器团队确认。metadata 记录
-`roll_source="fyst_focal_plane_rotation"`、`roll_nasmyth_port`、`roll_instrument_rotation_deg`，
+`ρ(t) = −nasmyth_sign·El(t)`；端口取自 schedule，
+clocking 应逐模块用 `Rz(−c)` 作用在 focalplane detector 四元数上；FYST 的 i1–i6 是环位置编号，与仪器团队的 IM1–IM6 方向相反。metadata 记录
+`roll_source="fyst_focal_plane_rotation"`、`roll_nasmyth_port`，
 `roll_convention="toast_q0_rz_local_z_v1"` 不变。只用机械角，视差旋转由 TOAST 处理。
 writer 转为 H5 shared `boresight_roll`（rad、float64、每 sample 一个值），纳入 hash manifest；
 `trajectory_info` 和 `simfyst_info` 记录来源与 convention。该 convention 明确表示

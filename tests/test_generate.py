@@ -9,8 +9,6 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import hashlib
 from dataclasses import replace
 from pathlib import Path
-import subprocess
-import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -60,7 +58,6 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             assert samples.meta[schema.ROLL_SOURCE_KEY] == schema.ROLL_SOURCE_FYST
             assert samples.meta[schema.ROLL_CONVENTION_KEY] == schema.ROLL_CONVENTION
             assert samples.meta[schema.ROLL_NASMYTH_PORT_KEY] == "right"
-            assert samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY] == 0.0
             blocks = samples.meta[schema.ECSV_BLOCKS]
             assert len(blocks) == len(report["science_blocks"]) == 1
             for block in blocks:
@@ -86,8 +83,8 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             assert all((Path(folder) / name).is_file() for name in files)
 
 
-@pytest.mark.parametrize("port,sign", [("right", 1), ("left", -1)])
-def test_build_instrument_rotation(tmp_path, port, sign):
+@pytest.mark.parametrize("port,sign", [("right", 1), ("left", -1), ("cassegrain", 0)])
+def test_build_nasmyth_roll(tmp_path, port, sign):
     from fyst_trajectories import Trajectory, get_fyst_site
 
     start = Time("2026-03-15T04:00:00.000", scale="utc", precision=3)
@@ -110,26 +107,9 @@ def test_build_instrument_rotation(tmp_path, port, sign):
     source.write_text("synthetic schedule hash input\n")
     samples = build_trajectory_table(
         "test", timeline, [(block, SimpleNamespace(trajectory=trajectory))],
-        source, instrument_rotation_deg=17.0,
+        source,
     )
     roll = samples[schema.ECSV_BORESIGHT_ROLL_DEG]
-    np.testing.assert_array_equal(roll.value, -(sign * trajectory.el + 17.0))
+    np.testing.assert_array_equal(roll.value, -sign * trajectory.el)
     assert roll.unit == u.deg and roll.dtype == np.float64
     assert samples.meta[schema.ROLL_NASMYTH_PORT_KEY] == port
-    assert samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY] == 17.0
-    assert isinstance(samples.meta[schema.ROLL_INSTRUMENT_ROTATION_DEG_KEY], float)
-
-
-@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
-def test_reject_nonfinite_instrument_rotation(tmp_path, value):
-    with pytest.raises(ValueError, match="instrument_rotation_deg must be finite"):
-        generate_trajectory("ces", tmp_path, instrument_rotation_deg=float(value))
-    script = Path(__file__).resolve().parents[1] / "scripts/generate_trajectory.py"
-    result = subprocess.run(
-        [sys.executable, str(script), "ces", "--output-dir", str(tmp_path),
-         f"--instrument-rotation-deg={value}"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 2
-    assert "instrument-rotation-deg 必须是有限值" in result.stderr
-    assert not list(tmp_path.iterdir())
