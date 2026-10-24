@@ -1,7 +1,7 @@
-"""第一步：同一个短 CES，比较 SimFYST baseline 与 TOAST SimGround。
+"""Compare the SimFYST baseline with TOAST SimGround for the same short CES.
 
-运行前在本 package 安装一次：python -m pip install --no-deps --no-build-isolation -e .
-本脚本只创建指向和初始 detector arrays，不运行 sky / noise simulation。
+Install this package before running: python -m pip install --no-deps --no-build-isolation -e .
+Create pointing and initial detector arrays without sky / noise simulation.
 """
 
 import argparse
@@ -11,12 +11,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import gettempdir
 
-# 本机 MPI 的空闲线程曾造成高 CPU；只在这个串行 example 中设置运行环境。
-# 要在 import numpy / toast 之前设置，不能依靠导入后的环境修改关闭 MPI。
+# Configure this serial example to avoid idle MPI threads consuming CPU.
+# Set before importing numpy / toast; changing the environment afterward cannot disable MPI.
 os.environ["MPI_DISABLE"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
-# TOAST import 会间接加载 Matplotlib；使用可写缓存，不在 terminal 留缓存警告。
+# TOAST imports Matplotlib indirectly; use a writable cache to avoid cache warnings.
 for key, subdir in (("MPLCONFIGDIR", "matplotlib"), ("XDG_CACHE_HOME", "cache")):
     cache = Path(gettempdir()) / "fyst-to-toast" / subdir
     cache.mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ iers.conf.auto_download = False
 
 
 def make_inputs():
-    """用 TOAST 原生类定义一个小 CES，避免依赖其他 repo 的路径或输出。"""
+    """Define a short CES with native TOAST classes, independent of other repositories."""
     start = datetime(2025, 1, 1, tzinfo=timezone.utc)
     scan = GroundScan(
         name="ces_baseline",
@@ -60,7 +60,7 @@ def make_inputs():
 
 
 def run_operator(operator_class):
-    """各自建立输入与空 Data，防止两次 apply 共享可变状态。"""
+    """Create separate inputs and empty Data to avoid sharing mutable state between apply calls."""
     schedule, telescope = make_inputs()
     data = toast.Data(toast.Comm(world=None, groupsize=1))
     operator = operator_class(
@@ -81,7 +81,7 @@ def run_operator(operator_class):
 
 
 def compare(reference, candidate):
-    """逐项比较实际生成的 Observation，不只比较 az/el 曲线。"""
+    """Compare generated Observations field by field, beyond az/el curves."""
     assert len(reference.obs) == len(candidate.obs) == 1
     left, right = reference.obs[0], candidate.obs[0]
     for name in ("name", "uid", "n_local_samples", "local_detectors"):
@@ -107,7 +107,7 @@ def compare(reference, candidate):
         b = [(iv.first, iv.last, iv.start, iv.stop) for iv in right.intervals[key]]
         assert a == b, key
         intervals[key] = len(a)
-    assert intervals["turnaround"] > 0  # 确实覆盖到了换向，避免只检查单向片段。
+    assert intervals["turnaround"] > 0  # Ensure the scan covers a turnaround, not just a one-way segment.
 
     detdata = []
     assert set(left.detdata) == set(right.detdata)
@@ -137,27 +137,27 @@ def main():
     parser.add_argument(
         "--output-dir", type=Path,
         default=Path(__file__).resolve().parents[1] / "output" / "ces_baseline",
-        help="检查报告目录；默认相对于脚本位置，不依赖 terminal 的 cwd",
+        help="Report directory; default is relative to the script, independent of the working directory",
     )
     args = parser.parse_args()
     reference = candidate = None
     try:
-        print("[1/3] 原生 SimGround：30 s CES，20 Hz，2 detectors")
+        print("[1/3] Native SimGround: 30 s CES, 20 Hz, 2 detectors")
         reference = run_operator(SimGround)
-        print("[2/3] 本地 SimFYST：相同输入，独立 Data")
+        print("[2/3] SimFYST: same inputs, separate Data")
         candidate = run_operator(SimFYST)
-        print("[3/3] 比较 Observation、全部 shared / intervals / detdata")
+        print("[3/3] Compare Observation and all shared / intervals / detdata")
         report = compare(reference, candidate)
         args.output_dir.mkdir(parents=True, exist_ok=True)
         report_path = args.output_dir / "report.json"
         report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-        print(f"\nPASS：1 observation，{report['samples']} samples，2 detectors")
-        print(f"{'shared 字段':<24} {'shape':<16} {'dtype':<10} 结果")
+        print(f"\nPASS: 1 observation, {report['samples']} samples, 2 detectors")
+        print(f"{'shared field':<24} {'shape':<16} {'dtype':<10} result")
         for row in report["shared"]:
-            print(f"{row['name']:<24} {str(row['shape']):<16} {row['dtype']:<10} 完全一致")
-        print(f"interval lists：{len(report['interval_counts'])} 个，全部一致")
-        print(f"detdata：{', '.join(row['name'] for row in report['detdata'])}，全部一致")
-        print(f"报告：{report_path.resolve()}")
+            print(f"{row['name']:<24} {str(row['shape']):<16} {row['dtype']:<10} identical")
+        print(f"interval lists: {len(report['interval_counts'])}, all identical")
+        print(f"detdata: {', '.join(row['name'] for row in report['detdata'])}, all identical")
+        print(f"Report:{report_path.resolve()}")
     finally:
         for data in (reference, candidate):
             if data is not None:

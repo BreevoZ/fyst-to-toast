@@ -1,7 +1,7 @@
-"""DS1：native TOAST sky / noise / binned-map 链路；不修改 SimFYST 输出。
+"""Native TOAST sky / noise / binned-map pipeline; leaves SimFYST outputs unchanged.
 
-CovarianceAndHits + BinMap 直接做分 bin，无 template / solver。
-测试复用本 example 的链路函数；所有数值模拟都由安装版 TOAST operators 完成。
+CovarianceAndHits + BinMap bin directly, without templates or solvers.
+Tests reuse this example's pipeline functions; installed TOAST operators perform all simulations.
 """
 
 import argparse
@@ -243,14 +243,14 @@ def main():
     parser.add_argument("--compare-simground", action="store_true")
     args = parser.parse_args()
     if not hp.isnsideok(args.nside, nest=True):
-        parser.error("--nside 必须为 HEALPix NESTED 支持的 2 的幂")
+        parser.error("--nside must be a power of two supported by HEALPix NESTED")
     if args.compare_simground and args.case != "ces":
-        parser.error("--compare-simground 仅支持 ces")
+        parser.error("--compare-simground supports only ces")
     folder = (args.output_dir or ROOT / "output/downstream" / args.case).resolve()
     if not folder.is_relative_to(ROOT / "output") or folder == ROOT / "output":
-        parser.error("--output-dir 必须在本 repo 的 output/ 子目录下")
+        parser.error("--output-dir must be a subdirectory of this repository's output/")
     if folder.exists() and not args.overwrite:
-        parser.error(f"输出目录已存在：{folder}；重跑请传 --overwrite")
+        parser.error(f"Output directory exists: {folder}; specify --overwrite to rerun")
     hdf5 = (args.hdf5_dir or ROOT / "output/generated" / args.case / "hdf5").resolve()
     manifest = hdf5 / "files.json"
     names = json.loads(manifest.read_text())
@@ -260,10 +260,10 @@ def main():
     sky_iqu, sky_i = folder / "input_IQU.fits", folder / "input_I.fits"
     synthetic_sky(args.nside, sky_iqu)
     synthetic_sky(args.nside, sky_i, "I")
-    print("链路：SimFYST → DefaultNoiseModel → PointingDetectorSimple(boresight_radec) → PixelsHealpix")
-    print("      → StokesWeights(IQU) → ScanHealpixMap → SimNoise(可关) → CovarianceAndHits → BinMap")
-    print(f"串行，14 detectors / 10 Hz；nside={args.nside}，NESTED / C；shared mask={SHARED_MASK}（含 turnaround=4）；rcond={RCOND}")
-    print("CovarianceAndHits + BinMap 直接分 bin，无 template；图中的无 hits / 病态像素留白，FITS 保留原生零值并附 rcond。")
+    print("Pipeline: SimFYST → DefaultNoiseModel → PointingDetectorSimple(boresight_radec) → PixelsHealpix")
+    print("      → StokesWeights(IQU) → ScanHealpixMap → SimNoise(optional) → CovarianceAndHits → BinMap")
+    print(f"Serial, 14 detectors / 10 Hz; nside={args.nside}, NESTED / C; shared mask={SHARED_MASK} (includes turnaround=4); rcond={RCOND}")
+    print("CovarianceAndHits + BinMap bin directly without templates; plots mask unhit / ill-conditioned pixels, while FITS retain native zeros and include rcond.")
     report = {"case": args.case, "nside": args.nside, "noise": not args.no_noise,
               "shared_flag_mask": SHARED_MASK, "det_flag_mask": DET_MASK, "rcond_threshold": RCOND}
     with solar_system_ephemeris.set("builtin"):
@@ -284,26 +284,26 @@ def main():
                 "intervals_only_in_simground": sorted(g_intervals - f_intervals),
                 "intervals_only_in_simfyst": sorted(f_intervals - g_intervals),
                 "schedule_boresight_angle_deg": [float(scan.boresight_angle.to_value(u.deg)) for scan in schedule.scans],
-                "note": "SimGround 直接把 FYST schedule 的天空系 boresight_angle 当 local roll（安装版 ops/sim_ground.py:771-776）；仅比较 I / hits，不作 Q/U 角度比较。",
-                "motion": "SimGround mount rate=1 deg/s、accel=1 deg/s²、fix_rate_on_sky=False；与 FYST CES 参数相符，但原生换向 / 起始相位 / 端点采样算法不同。",
+                "note": "SimGround uses the FYST schedule's sky-frame boresight_angle as local roll (installed ops/sim_ground.py:771-776); compare only I / hits, not Q/U angles.",
+                "motion": "SimGround mount rate=1 deg/s, accel=1 deg/s², fix_rate_on_sky=False match the FYST CES parameters, but native turnaround / initial phase / endpoint sampling algorithms differ.",
             }
     report["elapsed_s"] = round(time.perf_counter() - started, 3)
-    report["evidence"] = "执行验证"
+    report["evidence"] = "Verified by execution"
     (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     for engine in ("simfyst", "simground"):
         if engine in report:
             item = report[engine]
-            print(f"{engine}: {item['observations']} Observations，{item['samples']} samples，mask={item['masked_fraction']:.3%}，hits={item['total_hits']}，像素={item['hit_pixels']}")
-            print(f"  hits 加权中心={item['center_deg']}；signal-only I 最大残差={item['signal_only_I_max_residual_K']:.3e} K")
+            print(f"{engine}: {item['observations']} Observations, {item['samples']} samples, mask={item['masked_fraction']:.3%}, hits={item['total_hits']}, pixels={item['hit_pixels']}")
+            print(f"  hits-weighted center={item['center_deg']}; signal-only I max residual={item['signal_only_I_max_residual_K']:.3e} K")
             if args.case == "ces":
-                print(f"  patch 中心 330/−50 所在像素={item['patch_center_pixel']}；在合并 hits 足迹内={item['patch_center_in_footprint']}；该像素 hits={item['patch_center_pixel_hits']}（信息展示，不作为失败条件）")
+                print(f"  pixel at patch center 330/−50={item['patch_center_pixel']}; within combined hits footprint={item['patch_center_in_footprint']}; hits in that pixel={item['patch_center_pixel_hits']}(informational, not a failure condition)")
             else:
-                print(f"  距 patch 中心={item['patch_center_offset_deg']:.6f} deg")
+                print(f"  distance from patch center={item['patch_center_offset_deg']:.6f} deg")
             for row in item["structure"]:
-                print(f"  {row['name']} / {row['samples']} samples；shared={row['shared']}；intervals={row['intervals']}")
+                print(f"  {row['name']} / {row['samples']} samples; shared={row['shared']}; intervals={row['intervals']}")
     if "comparison" in report:
-        print("SimGround 对照：" + json.dumps(report["comparison"], ensure_ascii=False))
-    print(f"耗时 {report['elapsed_s']:.3f} s；文件：{folder}/input_*.fits、simfyst/[hits,I,Q,U,rcond].fits、PNG、report.json（对照另有 simground/）。")
+        print("SimGround comparison: " + json.dumps(report["comparison"], ensure_ascii=False))
+    print(f"Elapsed {report['elapsed_s']:.3f} s; files: {folder}/input_*.fits, simfyst/[hits,I,Q,U,rcond].fits, PNG, report.json (comparison also in simground/).")
 
 
 if __name__ == "__main__":

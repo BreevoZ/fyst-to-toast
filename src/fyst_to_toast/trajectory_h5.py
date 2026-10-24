@@ -407,7 +407,7 @@ def write_trajectory_blocks(
     roll_values, roll_source = _roll_from_ecsv(samples, roll_deg)
     folder = Path(output_dir)
     case = samples.meta[ECSV_CASE]
-    # 1. 五个 detectors 是 TOAST 自带的示意 focalplane。
+    # 1. Use TOAST's illustrative five-detector focalplane.
     site = GroundSite(
         site_name,
         latitude_deg * u.deg,
@@ -418,7 +418,7 @@ def write_trajectory_blocks(
     try:
         files = []
         for block in samples.meta[ECSV_BLOCKS]:
-            # 这是读取第二步原封保存的一块数组，不是重新决定如何划分 block。
+            # Read the preserved block arrays without changing block boundaries.
             part = samples[block[ECSV_FIRST] : block[ECSV_LAST]]
             times = part[ECSV_TIMESTAMP_UNIX_S].to_value(u.s)
             az, el = (
@@ -449,13 +449,13 @@ def write_trajectory_blocks(
             data.obs.append(obs)
             files.append(f"{name}.h5")
 
-            # 2. TOAST 的方向约定：Az 顺时针，而 longitude 逆时针。
+            # 2. TOAST convention: Az is clockwise, longitude is counterclockwise.
             roll = roll_values[block[ECSV_FIRST] : block[ECSV_LAST]]
             bore = _boresight_with_roll(az, el, roll)
             radec = azel_to_radec(site, times, bore, use_ephem=True)
             position, velocity = site.position_velocity(times)
 
-            # 3. FYST enum → TOAST bitmask；原始枚举另存，不会丢掉换向点。
+            # 3. FYST enum → TOAST bitmask; retain raw enums and turnaround samples.
             original_flags = np.asarray(part[ECSV_SCAN_FLAG])
             flags = to_toast_flags(
                 original_flags,
@@ -497,7 +497,7 @@ def write_trajectory_blocks(
                 obs.shared.create_column(key, shape=values.shape, dtype=values.dtype)
                 obs.shared[key].set(values, fromrank=0)
 
-            # 4. 以下是适配说明与核对信息，不是 FYST/TOAST 的新接口。
+            # 4. Record adapter metadata and validation information, not new FYST/TOAST interfaces.
             obs[_TRAJECTORY_INFO_KEY] = json.dumps(
                 {
                     "case": case,
@@ -529,12 +529,12 @@ def write_trajectory_blocks(
                 }
             )
 
-        # 5. 仍由原生 SaveHDF5 写 schema；一个 block 一文件，detdata=[]。
+        # 5. Use native SaveHDF5: one file per block, detdata=[].
         ops.SaveHDF5(
             volume=str(folder), volume_index=None, detdata=[], force_serial=True
         ).apply(data)
         if not all((folder / name).is_file() for name in files):
-            raise RuntimeError("SaveHDF5 没有产生全部预期文件")
+            raise RuntimeError("SaveHDF5 did not produce all expected files")
         return files
     finally:
         data.clear()

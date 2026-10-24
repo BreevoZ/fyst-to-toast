@@ -1,4 +1,4 @@
-"""单个 native trajectory block → caller Telescope → TOAST Observation H5。"""
+"""Single native trajectory block → caller Telescope → TOAST Observation H5."""
 
 import argparse
 import json
@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from tempfile import gettempdir
 
-# 必须在 NumPy / TOAST 导入前设置；library 本身不修改进程环境。
+# Set before NumPy / TOAST imports; the library leaves the process environment unchanged.
 for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[key] = "1"
 for key, folder in (("MPLCONFIGDIR", "matplotlib"), ("XDG_CACHE_HOME", "cache")):
@@ -33,7 +33,7 @@ from fyst_to_toast.trajectory_h5 import (
 
 
 def field_unit(key):
-    """Shared arrays 没有单位属性；此处显示契约单位，detdata 则自带 units。"""
+    """Shared arrays have no unit attribute; show contract units here. detdata carries units."""
     if key == "times" or key.endswith("_time_s"):
         return "s"
     if key in ("azimuth", "elevation"):
@@ -65,7 +65,7 @@ def main():
     args = parser.parse_args()
     iers.conf.auto_download = False
     with solar_system_ephemeris.set("builtin"):
-        # 仅从来源取站点坐标；两个 detectors 和 10 Hz nominal rate 由 caller 定义。
+        # Read only site coordinates from the source; the caller defines two detectors and a nominal 10 Hz rate.
         block = _load_trajectory_block(args.trajectory_file)
         site = GroundSite(
             "FYST-caller-site",
@@ -119,7 +119,7 @@ def main():
                 if key != "ALL_OBSERVATION_SAMPLES":
                     spans = [(int(iv.first), int(iv.last)) for iv in obs.intervals[key]]
                     print(f"Intervals {key} [first,last): {spans}")
-            # 禁用 volume index，重跑只替换这一 Observation H5，不追加重复索引。
+            # Disable the volume index so reruns replace only this Observation H5 without duplicate index entries.
             SaveHDF5(volume=str(folder), volume_index=None, force_serial=True).apply(
                 data
             )

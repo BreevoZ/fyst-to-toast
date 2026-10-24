@@ -1,4 +1,4 @@
-"""只读 HDF5 全屏浏览器；Tab 文件树，Enter 完整值，m metadata，q 恢复 terminal.
+"""Read-only full-screen HDF5 browser; Tab tree, Enter full value, m metadata, q restore terminal.
 
 python h5reader.py data/fyst_daisy_003_000.h5
 python h5reader.py file.h5 --tree
@@ -44,7 +44,7 @@ class H5Grid(GridViewer):
             self.put(
                 height - 1,
                 0,
-                "↑↓←→ / Space/b / g / 搜索 / Enter 全文 · Tab 文件树 · q 退出",
+                "↑↓←→ / Space/b / g / search / Enter full value · Tab tree · q quit",
                 self.curses.A_REVERSE,
             )
             self.screen.refresh()
@@ -66,7 +66,7 @@ class Browser:
         self.expanded = {"/", "/shared"}
         self.row, self.top = 0, 0
         self.utility = GridViewer(screen, curses, Table(), path, args, color)
-        self.notice = "Enter 打开 / 展开 · m attributes · d detector · / 找路径 · ? 帮助"
+        self.notice = "Enter open / expand · m attributes · d detector · / find path · ? help"
 
     def entries(self):
         """Traverse hard links, leaving soft/external/cyclic links unopened."""
@@ -108,7 +108,7 @@ class Browser:
             table = table_view(self.file, node, detector=self.args.detector)
             columns = self.args.columns if node == self.args.node else None
             if columns and any(name not in table.colnames for name in columns):
-                raise ValueError(f"列名不存在；可选：{', '.join(table.colnames)}")
+                raise ValueError(f"Unknown column; available: {', '.join(table.colnames)}")
             args = SimpleNamespace(**vars(self.args))
             args.columns = columns
             args.start = min(args.start, max(0, len(table) - 1))
@@ -117,7 +117,7 @@ class Browser:
         except ToTree:
             return "tree"
         except (KeyError, ValueError, TypeError, OSError) as error:
-            self.utility.popup("无法显示这个节点", str(error))
+            self.utility.popup("Cannot display this node", str(error))
             return "tree"
 
     def run(self):
@@ -147,7 +147,7 @@ class Browser:
             put(
                 height - 1,
                 0,
-                "↑↓ / Space/b 翻页 · → 展开 · ← 收起 · Enter 打开 · q 退出",
+                "↑↓ / Space/b pages · → expand · ← collapse · Enter open · q quit",
                 self.curses.A_REVERSE,
             )
             self.screen.refresh()
@@ -184,7 +184,7 @@ class Browser:
                 meta = attributes(self.file if selected == "trajectory" else self.file[selected])
                 self.utility.popup(f"Attributes · {selected}", detail_text("attributes", meta))
             elif key == "/":
-                query = self.utility.prompt("查找当前展开的路径：")
+                query = self.utility.prompt("Search expanded paths: ")
                 if query:
                     found = next(
                         (
@@ -197,24 +197,24 @@ class Browser:
                     if found is not None:
                         self.row = found % len(entries)
                     else:
-                        self.notice = f"没找到 {query!r}；可以先展开 group"
+                        self.notice = f"No match for {query!r}; try expanding groups first"
             elif key == "d":
-                value = self.utility.prompt("Detector index（0-based）：")
+                value = self.utility.prompt("Detector index (0-based): ")
                 if value is not None:
                     try:
                         self.args.detector = max(0, int(value))
                     except ValueError:
-                        self.notice = "请输入整数"
+                        self.notice = "Enter an integer"
             elif key == "?":
                 self.utility.popup(
                     "HDF5 reader",
-                    "默认表格为 trajectory 的 degree 视图。\n"
-                    "Tab 文件树；选择 shared 可以看全部原始列。\n"
-                    "选择 dataset 后 Enter 打开；向量展开成分量列。\n"
-                    "detdata 按 detector 切片，d 选择 detector 下标。\n"
-                    "m 查看节点 attributes，包含完整 JSON。\n"
-                    "q / Esc / Ctrl+C 退出，恢复原 terminal。\n"
-                    "每列按 256 行缓存，不会一次读取整个大 dataset。",
+                    "The default table shows the trajectory in degrees.\n"
+                    "Tab: file tree; select shared for all raw columns.\n"
+                    "Select a dataset and press Enter; vectors expand into component columns.\n"
+                    "detdata is sliced by detector; press d to select its index.\n"
+                    "m: node attributes, including full JSON.\n"
+                    "q / Esc / Ctrl+C: quit and restore the terminal.\n"
+                    "Columns are cached in 256-row chunks, without loading entire large datasets.",
                 )
 
 
@@ -225,12 +225,12 @@ def main(argv=None):
     )
     parser.add_argument("path", type=Path)
     parser.add_argument("--view", choices=["grid", "text"], default="grid")
-    parser.add_argument("--node", default="trajectory", help="trajectory 或真实 dataset/group 路径")
+    parser.add_argument("--node", default="trajectory", help="trajectory or an actual dataset/group path")
     parser.add_argument("--tree", action="store_true")
     parser.add_argument("--detector", type=int, default=0)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--rows", type=int)
-    parser.add_argument("--columns", help="显示列，逗号分隔")
+    parser.add_argument("--columns", help="Columns to display, comma-separated")
     parser.add_argument("--full", action="store_true")
     parser.add_argument("--precision", type=int, default=6)
     parser.add_argument("--color", choices=["auto", "always", "never"], default="auto")
@@ -241,7 +241,7 @@ def main(argv=None):
         or (args.rows is not None and args.rows < 0)
         or not 1 <= args.precision <= 17
     ):
-        parser.error("start / detector / rows 不可为负；precision 应为 1–17")
+        parser.error("start / detector / rows must be nonnegative; precision must be 1–17")
     args.columns = args.columns.split(",") if args.columns else None
     args.all, args.row, args.grid_rows = False, None, args.rows
     args.cell_width, args.start_at, args.details = 28, "data", False
@@ -280,7 +280,7 @@ def main(argv=None):
                 table = table_view(file, args.node, args.detector)
                 names = args.columns or table.colnames
                 if any(name not in table.colnames for name in names):
-                    raise ValueError(f"可选列：{', '.join(table.colnames)}")
+                    raise ValueError(f"Available columns: {', '.join(table.colnames)}")
                 print(f"HDF5 · {args.path.name} · {table.title} · {len(table):,} rows")
                 print("  ".join(pad(shorten(name, 24), 24) for name in names))
                 print(

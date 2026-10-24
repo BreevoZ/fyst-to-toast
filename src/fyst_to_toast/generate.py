@@ -1,7 +1,6 @@
 """Native FYST scheduling and per-sample ECSV generation.
 
-Ported from the user's local legacy examples (examples/fyst_to_toast/01-02 of the
-old fyst-trajectories sandbox).
+Adapted from the author's earlier local scheduling and trajectory examples.
 Only this module imports FYST, lazily. Callers configure IERS / ephemeris and
 MPI / thread settings; importing the package never configures the process.
 """
@@ -92,7 +91,7 @@ def generate_observing_timeline(patch, start, duration_s):
     from fyst_trajectories.overhead import OverheadModel, generate_timeline
 
     if not math.isfinite(duration_s) or duration_s <= 0:
-        raise ValueError("duration-s 必须是有限正数")
+        raise ValueError("duration-s must be finite and positive")
     return generate_timeline(
         patches=[patch],
         site=get_fyst_site(),
@@ -129,7 +128,7 @@ def reconstruct_trajectories(source, science):
     expected = [(b.scan_index, b.subscan_index) for b in science]
     actual = [(b.scan_index, b.subscan_index) for b, _ in pairs]
     if actual != expected:
-        raise RuntimeError(f"原生 reconstruction 跳过 blocks：{expected=}, {actual=}")
+        raise RuntimeError(f"Native reconstruction skipped blocks: {expected=}, {actual=}")
 
     return science_timeline, pairs
 
@@ -185,7 +184,7 @@ def build_trajectory_table(case, science_timeline, pairs, source):
         )
         if len(chunk) < 2:
             raise RuntimeError(
-                "science block 少于两个 samples，无法计算 native timestep"
+                "Science block has fewer than two samples; cannot compute native timestep"
             )
         chunks.append(chunk)
         blocks.append(
@@ -210,7 +209,7 @@ def build_trajectory_table(case, science_timeline, pairs, source):
         offset += len(chunk)
     samples = vstack(chunks)
     if not np.all(np.diff(samples[schema.ECSV_TIMESTAMP_UNIX_S].value) > 0):
-        raise RuntimeError("原生 timestamps 必须严格递增")
+        raise RuntimeError("Native timestamps must be strictly increasing")
     samples.meta = {
         schema.ECSV_CASE: case,
         schema.ECSV_COORDINATE_FRAME: "mount AltAz",
@@ -290,13 +289,13 @@ def generate_trajectory(
     folder = Path(output_dir).expanduser().resolve()
     outputs = [folder / name for name in OUTPUT_NAMES]
     if not overwrite and any(path.exists() for path in outputs):
-        raise FileExistsError("输出已存在；使用新的 output_dir 或显式 overwrite。")
+        raise FileExistsError("Outputs exist; choose a new output_dir or specify overwrite.")
     iers_path = Path(iers_file).expanduser().resolve() if iers_file else None
     if iers_path is not None:
         if not iers_path.is_file():
-            raise FileNotFoundError(f"找不到 IERS 文件：{iers_path}")
+            raise FileNotFoundError(f"IERS file not found: {iers_path}")
         if iers_path in outputs:
-            raise ValueError("输出不能覆盖 IERS 输入文件")
+            raise ValueError("Outputs must not overwrite the input IERS file")
 
     timeline = generate_observing_timeline(patch, start, duration_s)
     report = _initial_report(case, timeline, start, duration_s, iers_path)

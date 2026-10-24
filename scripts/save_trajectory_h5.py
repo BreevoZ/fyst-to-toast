@@ -1,8 +1,8 @@
-"""把已有 FYST trajectory ECSV 写为 TOAST Observation HDF5。
+"""Write an existing FYST trajectory ECSV as TOAST Observation HDF5.
 
-复制并整理自用户本地的 legacy FYST example（原文件 SHA-256 ca2c9b3e…，详见本地 docs/UPSTREAM.json）。
-保留原生 block、采样点、五个示意 detectors 和 TOAST SaveHDF5 schema。
-此脚本独立于 SimFYST；不生成新运动，也不实现 SimFYST 的 H5 reader。
+Adapted from the author's earlier local FYST example (source SHA-256 ca2c9b3e…).
+Preserve native blocks, samples, five illustrative detectors, and the TOAST SaveHDF5 schema.
+This script is independent of SimFYST; it neither generates motion nor implements its H5 reader.
 """
 
 import argparse
@@ -31,31 +31,31 @@ def read_site_metadata(schedule):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "trajectory", type=Path, help="旧 example 第 02 步生成的 fyst_trajectory.ecsv"
+        "trajectory", type=Path, help="Input fyst_trajectory.ecsv"
     )
     parser.add_argument(
         "--schedule",
         type=Path,
-        help="原生 timeline ECSV；默认 trajectory 同目录的 schedule.ecsv",
+        help="Native timeline ECSV; defaults to schedule.ecsv beside the trajectory",
     )
     parser.add_argument(
-        "--output-dir", type=Path, help="默认写到输入 ECSV 同目录的 hdf5/"
+        "--output-dir", type=Path, help="Default: hdf5/ beside the input ECSV"
     )
     parser.add_argument(
         "--iers-file",
         type=Path,
-        help="可选：离线 IERS-A 表；默认使用 Astropy 自带的数据",
+        help="Optional offline IERS-A table; defaults to Astropy bundled data",
     )
     parser.add_argument(
         "--roll-deg",
         type=float,
         default=0.0,
-        help="仅用于 legacy ECSV 的固定 local boresight roll；默认 0 deg",
+        help="Constant local boresight roll for legacy ECSV only; default 0 deg",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
-        help="允许覆盖本轮同名 H5 和清单；不删除其他文件",
+        help="Allow replacing matching H5 files and manifests; keep other files",
     )
     return parser, parser.parse_args()
 
@@ -70,11 +70,11 @@ def main():
     )
     for path in (source, schedule):
         if not path.is_file():
-            parser.error(f"找不到输入文件：{path}")
+            parser.error(f"Input file not found: {path}")
     if args.iers_file is not None and not args.iers_file.expanduser().is_file():
-        parser.error(f"找不到 IERS 文件：{args.iers_file}")
+        parser.error(f"IERS file not found: {args.iers_file}")
 
-    # 只配置本 CLI 的串行执行；package 不修改用户的 MPI / 线程环境。
+    # Configure serial execution for this CLI; the package leaves MPI / thread settings unchanged.
     os.environ["MPI_DISABLE"] = "1"
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -107,7 +107,7 @@ def main():
     solar_system_ephemeris.set("builtin")
 
     if not np.isfinite(args.roll_deg):
-        parser.error("roll 必须是有限数值")
+        parser.error("roll must be finite")
     samples = QTable.read(source)
     try:
         _, roll_source = _roll_from_ecsv(samples, args.roll_deg)
@@ -117,29 +117,29 @@ def main():
     schedule_hash = hashlib.sha256(schedule.read_bytes()).hexdigest()
     if samples.meta.get("source_schedule_sha256") != schedule_hash:
         parser.error(
-            "trajectory 与 schedule 的 SHA-256 不匹配；请使用同一轮生成的输入。"
+            "Trajectory and schedule SHA-256 mismatch; use inputs from the same generation run."
         )
     case = samples.meta.get("case", "")
     if not isinstance(case, str) or re.fullmatch(r"[A-Za-z0-9_]+", case) is None:
         parser.error(
-            "trajectory metadata.case 必须是可用于文件名的 pattern 名称，例如 ces / daisy"
+            "trajectory metadata.case must be a filename-safe pattern name, e.g. ces / daisy"
         )
     if not samples.meta.get("blocks") or not len(samples):
-        parser.error("trajectory 没有可写出的 blocks / samples")
+        parser.error("Trajectory has no blocks / samples to write")
 
-    # 在写入前检查 block 清单完整覆盖输入，且不重新分段。
+    # Check that blocks cover the input before writing, without repartitioning.
     offset, names = 0, []
     for block in samples.meta["blocks"]:
         if block["first"] != offset or not offset < block["last"] <= len(samples):
-            parser.error("blocks 的 [first,last) 必须连续覆盖输入数组且不能为空")
+            parser.error("Block [first,last) slices must be nonempty and cover the input contiguously")
         offset = block["last"]
         names.append(
             f"fyst_{case}_{block['scan_index']:03d}_{block['subscan_index']:03d}.h5"
         )
     if offset != len(samples) or len(set(names)) != len(names):
-        parser.error("blocks 必须覆盖所有样本，scan/subscan 组合不能产生重复文件名")
+        parser.error("Blocks must cover all samples; scan/subscan pairs must produce unique filenames")
     if not np.all(np.diff(samples["timestamp_unix_s"].to_value(u.s)) > 0):
-        parser.error("timestamps 必须严格递增")
+        parser.error("timestamps must be strictly increasing")
 
     folder = (
         args.output_dir.expanduser().resolve()
@@ -151,10 +151,10 @@ def main():
     ]
     if not args.overwrite and any(path.exists() for path in expected_paths):
         parser.error(
-            "输出已存在；请指定新的 --output-dir，或使用 --overwrite 明确覆盖。"
+            "Outputs exist; choose a new --output-dir or specify --overwrite."
         )
     if source in expected_paths or schedule in expected_paths:
-        parser.error("输出不能覆盖输入文件")
+        parser.error("Outputs must not overwrite input files")
     folder.mkdir(parents=True, exist_ok=True)
 
     site_name, latitude, longitude, height = read_site_metadata(schedule)
@@ -195,11 +195,11 @@ def main():
     }
     (folder / "writer_report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(
-        f"写入完成：{len(files)} blocks → {len(files)} TOAST H5，{len(samples)} samples。"
+        f"Written: {len(files)} blocks → {len(files)} TOAST H5 files, {len(samples)} samples."
     )
-    print("仪器：5 个示意 detectors；没有写入 detector signal。")
-    print(f"输出目录：{folder}")
-    print(f"本轮文件清单：{folder / 'files.json'}")
+    print("Instrument: 5 illustrative detectors; no detector signal saved.")
+    print(f"Output directory: {folder}")
+    print(f"File manifest: {folder / 'files.json'}")
 
 
 if __name__ == "__main__":

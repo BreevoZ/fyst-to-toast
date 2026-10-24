@@ -1,8 +1,8 @@
-"""调用外部 FYST library：scheduler inputs → native schedule → 逐样本 ECSV。
+"""Call FYST: scheduler inputs → native schedule → per-sample ECSV.
 
-移植自本地 legacy examples/fyst_to_toast/01_fyst_schedule.py、
-02_fyst_trajectory.py 和 _support/environment.py；来源见 G1 学习笔记。
-只负责调用原生 API 和保存返回数组，不另造 scheduler、切块或重采样。
+Adapted from the author's earlier local scheduling and trajectory examples.
+
+Call native APIs and save their arrays without rescheduling, splitting, or resampling.
 """
 
 import argparse
@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from tempfile import gettempdir
 
-# 串行 CLI 的进程设置，必须先于 NumPy / TOAST / FYST imports。
+# Configure serial execution before NumPy / TOAST / FYST imports.
 os.environ["MPI_DISABLE"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -29,26 +29,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("case", choices=["ces", "daisy", "pong"])
     parser.add_argument(
-        "--start", help="UTC ISO 时间；省略时使用该 case 的 legacy 日期"
+        "--start", help="UTC ISO time; defaults to the reference date for this case"
     )
     parser.add_argument(
         "--duration-s",
         type=float,
         default=DEFAULT_DURATION_S,
-        help=f"整个 scheduling window，含 overhead；默认 {DEFAULT_DURATION_S} s",
+        help=f"Scheduling window including overhead; default {DEFAULT_DURATION_S} s",
     )
     parser.add_argument(
-        "--output-dir", type=Path, help="默认本 repo 的 output/generated/<case>/"
+        "--output-dir", type=Path, help="Default: output/generated/<case>/ in this repository"
     )
     parser.add_argument(
-        "--iers-file", type=Path, help="离线 IERS-A 表；省略时使用 Astropy 自带数据"
+        "--iers-file", type=Path, help="Offline IERS-A table; defaults to Astropy bundled data"
     )
     parser.add_argument(
-        "--overwrite", action="store_true", help="允许替换本脚本的四个同名输出"
+        "--overwrite", action="store_true", help="Allow replacing this script's four output files"
     )
     args = parser.parse_args()
     if not math.isfinite(args.duration_s) or args.duration_s <= 0:
-        parser.error("duration-s 必须是有限正数")
+        parser.error("duration-s must be finite and positive")
     folder = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
@@ -56,13 +56,13 @@ def main():
     )
     outputs = [folder / name for name in OUTPUT_NAMES]
     if not args.overwrite and any(path.exists() for path in outputs):
-        parser.error("输出已存在；使用新的 --output-dir 或显式 --overwrite。")
+        parser.error("Outputs exist; choose a new --output-dir or specify --overwrite.")
     iers_path = args.iers_file.expanduser().resolve() if args.iers_file else None
     if iers_path is not None:
         if not iers_path.is_file():
-            parser.error(f"找不到 IERS 文件：{iers_path}")
+            parser.error(f"IERS file not found: {iers_path}")
         if iers_path in outputs:
-            parser.error("输出不能覆盖 IERS 输入文件")
+            parser.error("Outputs must not overwrite the input IERS file")
 
     for key in ("MPLCONFIGDIR", "XDG_CACHE_HOME", "NUMBA_CACHE_DIR"):
         default_cache = Path(gettempdir()) / "fyst-to-toast" / key.lower()
@@ -81,7 +81,7 @@ def main():
     try:
         start = Time(args.start or DEFAULT_START[args.case], scale="utc", precision=3)
     except ValueError as error:
-        parser.error(f"无法解析 UTC start：{error}")
+        parser.error(f"Cannot parse UTC start: {error}")
     report = generate_trajectory(
         args.case,
         folder,
@@ -92,10 +92,10 @@ def main():
     )
     if report["status"] == "no_science":
         raise SystemExit(
-            f"本窗口没有 science；已保存 full_timeline.ecsv 和 {folder / 'report.json'}"
+            f"No science in this window; saved full_timeline.ecsv and {folder / 'report.json'}"
         )
     print(json.dumps(report, indent=2))
-    print(f"输出：{folder}")
+    print(f"Output: {folder}")
 
 
 if __name__ == "__main__":

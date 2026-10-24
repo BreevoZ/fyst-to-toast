@@ -1,13 +1,13 @@
-"""FYST → ECSV → TOAST H5 → SimFYST 的逐步教学与 roll 对照。
+"""Step-by-step FYST → ECSV → TOAST H5 → SimFYST walkthrough and roll comparison.
 
-本 example 可以 import fyst_trajectories：它是教学对照，不是 library；
-只有 src/ 受运行库依赖边界约束。复用现有生成器、writer、loader 和 SimFYST，
-不重写它们的调度、运动、flags 或 interval 逻辑。所有产物写在 repo 的 output/。
+This teaching example imports fyst_trajectories directly;
+the library dependency boundary applies to src/. It reuses the generator, writer, loader, and SimFYST
+without reimplementing scheduling, motion, flags, or intervals. All outputs go under output/.
 """
 
 import os
 
-# 在 NumPy / TOAST / FYST 导入之前设置；只影响本教学进程及子进程。
+# Set before NumPy / TOAST / FYST imports; affects only this example and its subprocesses.
 for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[key] = "1"
 os.environ["MPLBACKEND"] = "Agg"
@@ -27,7 +27,7 @@ DEFAULT_DURATION_S = 6000.0
 
 
 class Tee:
-    """在终端和本次运行日志中同时保留教学输出。"""
+    """Write walkthrough output to both the terminal and the run log."""
 
     def __init__(self, terminal, log):
         self.terminal, self.log = terminal, log
@@ -44,11 +44,11 @@ class Tee:
 
 
 def step(number, owner, files, content):
-    print(f"\n第 {number} 步：{owner} · {files} · {content}")
+    print(f"\nStep {number}: {owner} · {files} · {content}")
 
 
 def unit_for(key):
-    """Shared arrays 不自带单位；这里明确打印 adapter 契约单位。"""
+    """Shared arrays carry no units; print the adapter's contract units explicitly."""
     if key == "times" or key.endswith("_time_s"):
         return "s"
     if key in ("azimuth", "elevation", "boresight_roll"):
@@ -78,7 +78,7 @@ def describe_arrays(arrays):
 
 
 def utc_ms(value):
-    """Time 或 Unix 数值 → 毫秒 UTC；不截断存储的浮点样本时钟。"""
+    """Time or Unix values → millisecond UTC; preserve stored floating-point sample times."""
     from astropy.time import Time
 
     stamp = value.utc.replicate() if isinstance(value, Time) else Time(value, format="unix", scale="utc")
@@ -98,7 +98,7 @@ def json_file(path, value):
 
 
 def roll_comparison(block, bore_quat, fp_quat, site, rotation_deg, schedule_angle):
-    """完整 block 的 horizon 几何对照；正确路径来自实际 SimFYST Observation。"""
+    """Compare horizon geometry over a full block using the actual SimFYST Observation."""
     import numpy as np
     from fyst_trajectories import InstrumentOffset, boresight_to_detector, compute_focal_plane_rotation
     from toast import qarray as qa
@@ -148,7 +148,7 @@ COLORS = {
 
 
 def draw_figures(folder, full, timeline, samples, blocks, obs_arrays, comparison, no_gif):
-    """仅作图抽样；误差、存储、flags 和 intervals 始终使用完整样本。"""
+    """Subsample only for plots; errors, storage, flags, and intervals use all samples."""
     import numpy as np
     import matplotlib
     matplotlib.use("Agg")
@@ -183,10 +183,10 @@ def draw_figures(folder, full, timeline, samples, blocks, obs_arrays, comparison
     figure_paths.append(path)
 
     fig, axes = plt.subplots(5, 1, figsize=(11, 8), sharex=True, layout="constrained")
-    rotation = samples.meta["roll_instrument_rotation_deg"]
+    rotation = 0.0  # Clocking is applied to focal-plane detectors, not the roll; none here.
     for index, (block, arrays) in enumerate(zip(blocks, obs_arrays, strict=True)):
         a = block.arrays
-        # 不跨 block 连线，也不连接 overhead 空档。
+        # Do not connect across blocks or overhead gaps.
         take = np.unique(np.linspace(0, len(a["times"]) - 1, min(3500, len(a["times"]))).astype(int))
         elapsed = (a["times"] - origin.unix) / 60
         theta = compute_focal_plane_rotation(a["fyst_el_deg"], site=timeline.site,
@@ -195,7 +195,7 @@ def draw_figures(folder, full, timeline, samples, blocks, obs_arrays, comparison
         axes[1].plot(elapsed[take], a["fyst_el_deg"][take], color=COLORS["Boresight"])
         axes[2].plot(elapsed[take], theta[take], color="#13966a", label="FYST theta" if index == 0 else None)
         axes[2].plot(elapsed[take], np.rad2deg(a["boresight_roll"])[take], color="#287fc1", label="TOAST rho" if index == 0 else None)
-        # Flags 是离散状态，保留全部点，防止短 turnaround 被抽样跳过。
+        # Keep all flag samples so subsampling cannot hide short turnarounds.
         axes[3].step(elapsed, a["fyst_scan_flag"], where="post", color="#8267bc")
         axes[4].step(elapsed, arrays["flags"], where="post", color="#d95056")
         for ax in axes:
@@ -240,7 +240,7 @@ def draw_figures(folder, full, timeline, samples, blocks, obs_arrays, comparison
     gif_path = folder / "walkthrough.gif"
     frames_dir = folder / "frames"
     if no_gif:
-        # --overwrite --no-gif 不应留下前一轮动画作为本轮结果。
+        # --overwrite --no-gif must not leave a previous animation as a current result.
         gif_path.unlink(missing_ok=True)
         for name in ("first.png", "middle.png", "last.png"):
             (frames_dir / name).unlink(missing_ok=True)
@@ -318,7 +318,7 @@ def draw_figures(folder, full, timeline, samples, blocks, obs_arrays, comparison
             gif.convert("RGB").save(frames_dir / f"{name}.png")
     byte_count = gif_path.stat().st_size
     if byte_count > 5_000_000:
-        raise RuntimeError(f"GIF 大于 5 MB：{byte_count} bytes")
+        raise RuntimeError(f"GIF exceeds 5 MB: {byte_count} bytes")
     figure_paths.extend([gif_path, *(frames_dir / f"{name}.png" for name in ("first", "middle", "last"))])
     return figure_paths, {"frames": frame_count, "bytes": byte_count, "fps": 10,
                           "sample_indices": frames.tolist(), "size_pixels": [800, 480]}
@@ -335,7 +335,7 @@ def run(args):
 
     iers.conf.auto_download = False
     iers.conf.iers_degraded_accuracy = "error"
-    # 显式 bundled IERS-A，writer 子进程也收到同一文件，避免使用用户缓存的表。
+    # Use explicit bundled IERS-A in both this process and the writer, avoiding cached user tables.
     iers.earth_orientation_table.set(iers.IERS_A.open(iers.IERS_A_FILE))
     solar_system_ephemeris.set("builtin")
 
@@ -361,77 +361,77 @@ def run(args):
         command = viewer or f"cat {shlex.quote(str(path))}"
         files.append({"file": str(path.relative_to(out)), "producer": owner, "view": command})
 
-    step(1, "FYST 原生（本 repo 调用）", f"case={args.case} → {generation}/schedule.ecsv", "调度、overhead、science blocks")
-    print("generate_trajectory 一次完成第 1、2 步；下面按文件逐层展开，不重复生成轨迹。")
+    step(1, "Native FYST (called by this repository)", f"case={args.case} → {generation}/schedule.ecsv", "Scheduling, overhead, science blocks")
+    print("generate_trajectory performs Steps 1 and 2 together; inspect each file below without regenerating trajectories.")
     generated = generate_trajectory(args.case, generation, duration_s=args.duration_s,
                                     iers_file=iers.IERS_A_FILE, overwrite=args.overwrite)
     if generated["status"] != "complete":
-        raise RuntimeError(f"窗口没有 science；检查 {generation}/full_timeline.ecsv，增大 --duration-s。")
+        raise RuntimeError(f"No science in this window; inspect {generation}/full_timeline.ecsv and increase --duration-s.")
     schedule = QTable.read(generation / "schedule.ecsv")
     full = QTable.read(generation / "full_timeline.ecsv")
     timeline = read_timeline(generation / "full_timeline.ecsv")
     science = read_timeline(generation / "schedule.ecsv")
-    print(f"【执行验证】science blocks={len(schedule)}；window={args.duration_s:g} s")
+    print(f"[Verified] science blocks={len(schedule)}; window={args.duration_s:g} s")
     print("scan/subscan  start UTC                         stop UTC                          Az min/max [deg]       El [deg]  sky boresight_angle [deg]")
     for row in schedule:
         print(f"{row['scan_index']:3}/{row['subscan_index']:<3}  {row['start_time']}  {row['stop_time']}  "
               f"{row['azmin'].value:9.3f}/{row['azmax'].value:9.3f}  {row['el'].value:8.3f}  {row['boresight_angle'].value:10.6f}")
     if len(schedule) < 2:
-        print("本次自选窗口只有一个 science block；可增大 --duration-s 查看多个 blocks。")
+        print("This window has only one science block; increase --duration-s to see multiple blocks.")
     for name in ("full_timeline.ecsv", "schedule.ecsv"):
         path = generation / name
-        record(path, "第1步 / FYST write_timeline", f"python tools/ecsv_reader.py {shlex.quote(str(path))} --view text --pager never --rows 8")
+        record(path, "Step 1 / FYST write_timeline", f"python tools/ecsv_reader.py {shlex.quote(str(path))} --view text --pager never --rows 8")
 
     source = generation / "fyst_trajectory.ecsv"
-    step(2, "FYST 原生重建 + 本 repo 保存", f"{generation}/schedule.ecsv → {source}", "原始逐样本 arrays、roll、metadata")
+    step(2, "Native FYST reconstruction + adapter storage", f"{generation}/schedule.ecsv → {source}", "Raw per-sample arrays, roll, metadata")
     samples = QTable.read(source)
     for key in samples.colnames:
         print(f"  {key:<25} {str(samples[key].dtype):<8} {str(getattr(samples[key], 'unit', '1'))}")
-    print("\n前 3 行（保留原始数值；未重采样）：")
+    print("\nFirst 3 rows (original values; no resampling):")
     print("\n".join(samples[:3].pformat(max_lines=-1, max_width=-1)))
-    print("FYST scan_flag 计数：", counts(samples["scan_flag"]))
+    print("FYST scan_flag counts:", counts(samples["scan_flag"]))
     roll_meta = {k: v for k, v in samples.meta.items() if k.startswith("roll_")}
-    print("roll metadata：", json.dumps(roll_meta, ensure_ascii=False))
+    print("roll metadata: ", json.dumps(roll_meta, ensure_ascii=False))
     for b in samples.meta["blocks"]:
         roll = samples["boresight_roll_deg"].value[b["first"]:b["last"]]
         print(f"  block {b['scan_index']}/{b['subscan_index']}: N={len(roll)}, "
               f"roll min/max/drift={roll.min():.6f}/{roll.max():.6f}/{np.ptp(roll):.6f} deg")
-    record(source, "第2步 / FYST reconstruction + 本 repo QTable", f"python tools/ecsv_reader.py {shlex.quote(str(source))} --view text --pager never --rows 5")
-    record(generation / "report.json", "第1–2步 / generate_trajectory")
+    record(source, "Step 2 / FYST reconstruction + adapter QTable", f"python tools/ecsv_reader.py {shlex.quote(str(source))} --view text --pager never --rows 5")
+    record(generation / "report.json", "Steps 1–2 / generate_trajectory")
 
-    step(3, "本 repo writer → TOAST 原生 SaveHDF5", f"{source} → {writer_dir}/*.h5", "每 native block 一个文件，5 个示意 detectors")
+    step(3, "Adapter writer → native TOAST SaveHDF5", f"{source} → {writer_dir}/*.h5", "One file per native block, 5 illustrative detectors")
     command = [sys.executable, str(REPO / "scripts/save_trajectory_h5.py"), str(source),
                "--output-dir", str(writer_dir), "--iers-file", str(iers.IERS_A_FILE)]
     if args.overwrite:
         command.append("--overwrite")
-    print("复用 CLI 的站点读取/校验，使用 subprocess：", shlex.join(command))
+    print("Reuse CLI site loading / validation via subprocess:", shlex.join(command))
     result = subprocess.run(command, capture_output=True, text=True)
     (writer_dir / "writer_cli.log").write_text(result.stdout + result.stderr)
     if result.returncode:
-        raise RuntimeError(f"writer 失败，查看 {writer_dir}/writer_cli.log")
+        raise RuntimeError(f"Writer failed; see {writer_dir}/writer_cli.log")
     h5_paths = [writer_dir / name for name in json.loads((writer_dir / "files.json").read_text())]
-    print("Shared 单位是文件契约说明，H5 shared dataset 本身不带 unit 属性。")
+    print("Shared units describe the file contract; H5 shared datasets have no unit attribute.")
     for path in h5_paths:
         print(f"\n{path}")
         with h5py.File(path) as saved:
             describe_arrays(dict(saved["shared"].items()))
             info = json.loads(saved["metadata/other"].attrs["trajectory_info"])
-            print("  trajectory_info：", json.dumps({k: info[k] for k in
+            print("  trajectory_info: ", json.dumps({k: info[k] for k in
                   ("case", "sample_rate_hz", "roll_source", "roll_convention", "block")}, ensure_ascii=False))
-        record(path, "第3步 / writer + SaveHDF5", f"python tools/h5reader.py {shlex.quote(str(path))} --tree")
+        record(path, "Step 3 / writer + SaveHDF5", f"python tools/h5reader.py {shlex.quote(str(path))} --tree")
     for name in ("files.json", "writer_report.json", "writer_cli.log"):
-        record(writer_dir / name, "第3步 / writer CLI")
+        record(writer_dir / name, "Step 3 / writer CLI")
 
-    step(4, "TOAST 原生 LoadHDF5 + 本 repo loader", f"{writer_dir}/*.h5 → {loader_dir}/loader_summary.json", "临时 Observation vs 13-array _TrajectoryBlock")
+    step(4, "Native TOAST LoadHDF5 + adapter loader", f"{writer_dir}/*.h5 → {loader_dir}/loader_summary.json", "Temporary Observation vs 13-array _TrajectoryBlock")
     blocks, loader_summary = [], []
     for path in h5_paths:
         temporary = Data(Comm(world=None))
         try:
             LoadHDF5(files=[str(path)], detdata=[], force_serial=True).apply(temporary)
             obs = temporary.obs[0]
-            print(f"\n临时 Observation {obs.name}: detectors={len(obs.all_detectors)} {obs.all_detectors}; "
+            print(f"\nTemporary Observation {obs.name}: detectors={len(obs.all_detectors)} {obs.all_detectors}; "
                   f"shared={len(obs.shared)}, detdata={list(obs.detdata)}, intervals={list(obs.intervals)}")
-            print("  含示意 instrument、geometry、flags；下面的 loader 只返回输入 arrays 与 metadata。")
+            print("  Includes an illustrative instrument, geometry, and flags; the loader below returns only input arrays and metadata.")
             native_count = len(obs.all_detectors)
             assert native_count == 5
         finally:
@@ -439,7 +439,7 @@ def run(args):
         block = _load_trajectory_block(path)
         blocks.append(block)
         assert len(block.arrays) == 13
-        print(f"_TrajectoryBlock {block.observation_name}: 不携带 focalplane / detector / Observation")
+        print(f"_TrajectoryBlock {block.observation_name}: Contains no focalplane / detector / Observation")
         description = describe_arrays(block.arrays)
         print("  metadata: trajectory_info, source_shared_array_sha256, source_site, actual_rate_hz, clock residual, roll convention/source")
         loader_summary.append({"name": block.observation_name, "temporary_detectors": native_count,
@@ -447,9 +447,9 @@ def run(args):
                                "actual_rate_hz": block.actual_rate_hz,
                                "max_phase_residual_s": block.max_phase_residual_s})
     json_file(loader_dir / "loader_summary.json", loader_summary)
-    record(loader_dir / "loader_summary.json", "第4步 / 本例检查 native LoadHDF5 与 adapter loader；arrays 在内存")
+    record(loader_dir / "loader_summary.json", "Step 4 / Example checks native LoadHDF5 and adapter loader; arrays remain in memory")
 
-    step(5, "本 repo SimFYST → TOAST 原生 Observation/SaveHDF5", f"{writer_dir}/*.h5 + caller Telescope → {sim_dir}/*.h5", "2 个 caller detectors、flags、intervals、rate/roll")
+    step(5, "SimFYST → native TOAST Observation/SaveHDF5", f"{writer_dir}/*.h5 + caller Telescope → {sim_dir}/*.h5", "2 caller detectors, flags, intervals, rate/roll")
     obs_arrays, sim_summary = [], []
     fp_quat = xieta_to_quat(np.sin(np.deg2rad(1.0)), 0.0, 0.0)
     for path, block in zip(h5_paths, blocks, strict=True):
@@ -472,37 +472,37 @@ def run(args):
             info = json.loads(obs["simfyst_info"])
             spans = {name: [[int(iv.first), int(iv.last)] for iv in obs.intervals[name]]
                      for name in (op.scanning_interval, op.turnaround_interval, op.fyst_invalid_interval)}
-            print("  flag_mapping / class_counts：", info["flag_mapping"], info["class_counts"])
-            print("  intervals 数量：", {key: len(value) for key, value in spans.items()})
-            print("  rate_check：", info["rate_check"])
-            print("  roll 来源：", info["roll_source"], info["roll_convention"])
-            print("  detdata 为零初始化 signal/flags，本例没有 sky/noise simulation。")
+            print("  flag_mapping / class_counts: ", info["flag_mapping"], info["class_counts"])
+            print("  interval counts: ", {key: len(value) for key, value in spans.items()})
+            print("  rate_check: ", info["rate_check"])
+            print("  roll source: ", info["roll_source"], info["roll_convention"])
+            print("  detdata contains zero-initialized signal/flags; this example runs no sky/noise simulation.")
             np.testing.assert_array_equal(arrays["boresight_roll"], block.arrays["boresight_roll"])
             obs_arrays.append({key: arrays[key].copy() for key in ("boresight_azel", "flags")})
             sim_summary.append({"name": obs.name, "simfyst_info": info, "intervals_samples_half_open": spans})
             SaveHDF5(volume=str(sim_dir), volume_index=None, force_serial=True).apply(data)
             saved_path = sim_dir / f"{obs.name}.h5"
-            record(saved_path, "第5步 / SimFYST caller Observation + SaveHDF5", f"python tools/h5reader.py {shlex.quote(str(saved_path))} --tree")
+            record(saved_path, "Step 5 / SimFYST caller Observation + SaveHDF5", f"python tools/h5reader.py {shlex.quote(str(saved_path))} --tree")
         finally:
             data.clear()
     json_file(sim_dir / "simfyst_summary.json", sim_summary)
-    record(sim_dir / "simfyst_summary.json", "第5步 / 本例导出实际 SimFYST metadata/intervals")
+    record(sim_dir / "simfyst_summary.json", "Step 5 / Example exports actual SimFYST metadata/intervals")
 
-    step(6, "FYST 原生 vs 本 repo/TOAST 原生", f"同一 block 的实际 arrays → {out}/report.json + figures/", "时间、Az、flags、roll、intervals 数值对照")
+    step(6, "Native FYST vs adapter/native TOAST", f"Actual arrays from the same block → {out}/report.json + figures/", "Numerical comparisons of time, Az, flags, roll, intervals")
     block, arrays = blocks[0], blocks[0].arrays
     t = arrays["times"]
     j = min(123, len(t) - 1)
     relative = arrays["fyst_block_time_s"]
     restored = Time(t[0], format="unix", scale="utc") + TimeDelta(relative[j] - relative[0], format="sec")
-    print(f"a. 时间：样本 {j}，FYST block_time_s={relative[j]:.9f} s，首样本 block_time_s={relative[0]:.9f} s")
-    print(f"   由保存值还原 Astropy Time={utc_ms(restored)}；TOAST Unix float64={t[j]:.9f} s → {utc_ms(t[j])}")
-    print(f"   schedule start={schedule[0]['start_time']}；Astropy/Unix 残差={restored.unix - t[j]:.3g} s；UTC 文本只显示毫秒。")
+    print(f"a. Time: sample {j}, FYST block_time_s={relative[j]:.9f} s, first sample block_time_s={relative[0]:.9f} s")
+    print(f"   Astropy Time reconstructed from saved values={utc_ms(restored)}; TOAST Unix float64={t[j]:.9f} s → {utc_ms(t[j])}")
+    print(f"   schedule start={schedule[0]['start_time']}; Astropy/Unix residual={restored.unix - t[j]:.3g} s; UTC text shows milliseconds only.")
     lon, lat, _ = qa.to_lonlat_angles(obs_arrays[0]["boresight_azel"])
     delta = np.arctan2(np.sin(lon + arrays["azimuth"]), np.cos(lon + arrays["azimuth"]))
-    print(f"b. Az：原 Az={arrays['fyst_az_deg'][j]:.6f} deg，quaternion longitude={np.rad2deg(lon[j]):.6f} deg，"
-          f"回投 -longitude={-np.rad2deg(lon[j]):.6f} deg；wrap 后 max|lon+Az|={np.rad2deg(abs(delta)).max():.3g} deg")
-    print("   【仅读源码】Q0=qa.from_lonlat_angles(-az, el, 0)，随后右乘 Rz(roll)：trajectory_h5.py:_boresight_with_roll。")
-    print("c. Flags：FYST enum → TOAST bitmask（只统计所选 block；缺席状态计数为 0）")
+    print(f"b. Az: original Az={arrays['fyst_az_deg'][j]:.6f} deg, quaternion longitude={np.rad2deg(lon[j]):.6f} deg, "
+          f"Projected back -longitude={-np.rad2deg(lon[j]):.6f} deg; After wrapping, max|lon+Az|={np.rad2deg(abs(delta)).max():.3g} deg")
+    print("   [Source inspection] Q0=qa.from_lonlat_angles(-az, el, 0), then right-multiply by Rz(roll): trajectory_h5.py:_boresight_with_roll.")
+    print("c. Flags: FYST enum → TOAST bitmask (selected block only; absent states have zero counts)")
     raw, flags = arrays["fyst_scan_flag"], obs_arrays[0]["flags"]
     flag_rows = []
     for code, mask in ((0, 1), (1, 0), (2, 4), (3, 1)):
@@ -511,32 +511,32 @@ def run(args):
                "matched": int(np.count_nonzero(selected & (flags == mask)))}
         assert row["samples"] == row["matched"]
         flag_rows.append(row)
-        print(f"   {code} → {mask}: FYST={row['samples']}, TOAST 匹配={row['matched']}")
+        print(f"   {code} → {mask}: FYST={row['samples']}, TOAST matches={row['matched']}")
     schedule_angle = float(schedule[0]["boresight_angle"].to_value(u.deg))
     comparison = roll_comparison(block, obs_arrays[0]["boresight_azel"], fp_quat, science.site,
-                                 samples.meta["roll_instrument_rotation_deg"], schedule_angle)
+                                 0.0, schedule_angle)
     theta, poses, errors = comparison
     rho = np.rad2deg(arrays["boresight_roll"])
-    print(f"d. Roll：schedule boresight_angle={schedule_angle:.9f} deg（天空坐标系，每 block 一个值，含视差角）")
-    print(f"   FYST 机械 theta 范围={theta.min():.9f}..{theta.max():.9f} deg；TOAST rho 范围={rho.min():.9f}..{rho.max():.9f} deg")
-    print(f"   同一样本 {j}: El={arrays['fyst_el_deg'][j]:.9f}，theta={theta[j]:.9f}，rho={rho[j]:.9f} deg")
+    print(f"d. Roll: schedule boresight_angle={schedule_angle:.9f} deg (sky frame, one value per block, includes parallactic angle)")
+    print(f"   FYST mechanical theta range={theta.min():.9f}..{theta.max():.9f} deg; TOAST rho range={rho.min():.9f}..{rho.max():.9f} deg")
+    print(f"   Same sample {j}: El={arrays['fyst_el_deg'][j]:.9f}, theta={theta[j]:.9f}, rho={rho[j]:.9f} deg")
     for label, error in errors.items():
-        print(f"   【执行验证】{label:<20} max detector separation={error:.12g} arcsec（全部 {len(t)} 点）")
-    print("   【仅读源码】FYST +x = TOAST local -Y，所以 rho=-theta；视差旋转由 TOAST azel_to_radec 处理。")
-    print("   依据：research_notes/roll_investigation_2026-10-19/README.md:9–20、:56–62。此处只验 horizon 几何。")
-    print(f"e. 名义 block=[{schedule[0]['start_time']}, {schedule[0]['stop_time']})")
-    print(f"   实际首/末样本={utc_ms(t[0])} / {utc_ms(t[-1])}，N={len(t)}；名义 stop 不保证等于最后一个 sample。")
+        print(f"   [Verified] {label:<20} max detector separation={error:.12g} arcsec (all {len(t)} samples)")
+    print("   [Source inspection] FYST +x = TOAST local -Y, so rho=-theta; TOAST azel_to_radec handles parallactic rotation.")
+    print("   This comparison validates horizon geometry only.")
+    print(f"e. Nominal block=[{schedule[0]['start_time']}, {schedule[0]['stop_time']})")
+    print(f"   Actual first/last samples={utc_ms(t[0])} / {utc_ms(t[-1])}, N={len(t)}; nominal stop need not equal the last sample.")
     for key, spans in sim_summary[0]["intervals_samples_half_open"].items():
-        print(f"   TOAST {key}: {len(spans)} 个样本区间 [first,last)，前3个={spans[:3]}")
+        print(f"   TOAST {key}: {len(spans)} sample intervals [first,last), first 3={spans[:3]}")
         if spans:
             first, last = spans[0]
-            print(f"     首段包含样本 {first}..{last - 1}：{utc_ms(t[first])} → {utc_ms(t[last - 1])}")
-    print("【执行验证】只在作图时抽样：PNG 每条曲线最多 3500 点，GIF 64 帧/120 s 拖尾；flags 图保留全部点。")
+            print(f"     First interval contains samples {first}..{last - 1}: {utc_ms(t[first])} → {utc_ms(t[last - 1])}")
+    print("[Verified] Subsample only for plotting: at most 3500 points per PNG curve, 64 GIF frames with a 120 s trail; flag plots keep all samples.")
     figure_paths, gif = draw_figures(out / "figures", full, timeline, samples, blocks, obs_arrays, comparison, args.no_gif)
     for path in figure_paths:
-        record(path, "第6步 / matplotlib Agg + PillowWriter（图像子采样）", f"open {shlex.quote(str(path))}")
+        record(path, "Step 6 / matplotlib Agg + PillowWriter (plot subsampling)", f"open {shlex.quote(str(path))}")
     report = {
-        "evidence": "执行验证", "case": args.case, "duration_s": args.duration_s,
+        "evidence": "Verified by execution", "case": args.case, "duration_s": args.duration_s,
         "science_blocks": len(blocks), "samples": len(samples), "selected_block": block.observation_name,
         "selected_samples": len(t), "roll_metadata": roll_meta,
         "schedule_boresight_angle_deg": schedule_angle,
@@ -546,16 +546,16 @@ def run(args):
         "time_example": {"sample": j, "block_time_s": float(relative[j]), "unix_s": float(t[j]), "utc": utc_ms(t[j])},
         "longitude_max_error_deg": float(np.rad2deg(abs(delta)).max()),
         "gif": gif, "iers_file": str(iers.IERS_A_FILE), "iers_auto_download": False,
-        "unrun": ["独立 sky astrometry", "真实仪器/偏振标定", "MPI", "sky/noise simulation"],
+        "unrun": ["independent sky astrometry", "real instrument / polarization calibration", "MPI", "sky/noise simulation"],
     }
-    record(out / "report.json", "第6步 / 本例完整数值报告")
-    record(out / "walkthrough.log", "第1–6步 / 终端输出")
-    record(out / "file_map.json", "收尾 / 本例文件地图")
+    record(out / "report.json", "Step 6 / Full numerical report from this example")
+    record(out / "walkthrough.log", "Steps 1–6 / Terminal output")
+    record(out / "file_map.json", "Summary / example file map")
     json_file(out / "file_map.json", files)
-    print("\n文件地图（命令从 repo 根目录执行；JSON/log 用 cat，PNG/GIF 用图像查看器）：")
+    print("\nFile map (run commands from the repository root; use cat for JSON/log and an image viewer for PNG/GIF):")
     for item in files:
         print(f"  {item['file']} → {item['producer']}\n    {item['view']}")
-    print("【未运行】独立 sky astrometry、真实仪器/偏振标定、MPI、sky/noise；本例不验收扫描动力学。")
+    print("[Not run] independent sky astrometry, real instrument / polarization calibration, MPI, sky/noise; this example does not validate scan dynamics.")
     return report
 
 
@@ -565,18 +565,18 @@ def main():
     parser.add_argument("case", nargs="?", choices=("ces", "daisy", "pong"), default="daisy")
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--duration-s", type=float, default=DEFAULT_DURATION_S,
-                        help="含原生 overhead 的调度窗口；默认 6000 s，至少两个 science blocks")
+                        help="Scheduling window including native overhead; default 6000 s, at least two science blocks")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-gif", action="store_true")
     args = parser.parse_args()
     if not math.isfinite(args.duration_s) or args.duration_s <= 0:
-        parser.error("duration-s 必须是有限正数")
+        parser.error("duration-s must be finite and positive")
     args.output_dir = (args.output_dir or REPO / "output/walkthrough" / args.case).expanduser().resolve()
     output_root = (REPO / "output").resolve()
     if not args.output_dir.is_relative_to(output_root) or args.output_dir == output_root:
-        parser.error("所有产物必须放在本 repo output/ 的子目录中")
+        parser.error("All outputs must be in a subdirectory of this repository's output/")
     if args.output_dir.exists() and not args.overwrite:
-        parser.error("输出目录已存在；请换目录或显式 --overwrite")
+        parser.error("Output directory exists; choose another directory or specify --overwrite")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for key in ("MPLCONFIGDIR", "XDG_CACHE_HOME", "NUMBA_CACHE_DIR"):
         cache = args.output_dir / ".cache" / key.lower()
@@ -587,9 +587,9 @@ def main():
             report = run(args)
             report["elapsed_s"] = time.perf_counter() - started
             json_file(args.output_dir / "report.json", report)
-            print(f"\n【执行验证】完成，用时 {report['elapsed_s']:.2f} s；报告：{args.output_dir / 'report.json'}")
+            print(f"\n[Verified] Completed in {report['elapsed_s']:.2f} s; Report: {args.output_dir / 'report.json'}")
             if report["gif"]:
-                print(f"GIF：{report['gif']['frames']} 帧，{report['gif']['bytes'] / 1_000_000:.3f} MB；首/中/末帧已保存。")
+                print(f"GIF: {report['gif']['frames']} frames, {report['gif']['bytes'] / 1_000_000:.3f} MB; First/middle/last frames saved.")
 
 
 if __name__ == "__main__":

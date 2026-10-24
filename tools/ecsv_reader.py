@@ -371,7 +371,7 @@ class GridViewer:
         self.rows = [args.row] if args.row is not None else range(args.start, min(len(table), end))
         self.row = self.col = self.top = self.left = 0
         self.query = ""
-        self.notice = "Enter 全文 · m metadata · u 列信息 · / 搜索 · g 跳行 · ? 帮助"
+        self.notice = "Enter full value · m metadata · u columns · / search · g go to row · ? help"
         self.colors = []
         screen.keypad(True)
         curses.curs_set(0)
@@ -445,7 +445,7 @@ class GridViewer:
         height, width = self.screen.getmaxyx()
         self.screen.erase()
         if height < 12 or width < 40:
-            self.put(0, 0, "窗口太小，请放大；q 退出")
+            self.put(0, 0, "Window too small; enlarge it or press q to quit")
             self.screen.refresh()
             return [], 1
         page = height - 9
@@ -500,7 +500,7 @@ class GridViewer:
         self.put(
             height - 1,
             0,
-            "↑↓ 行  ←→ 列  Space/b 翻页  [ ] 横向翻页  q 退出",
+            "↑↓ rows  ←→ columns  Space/b pages  [ ] horizontal pages  q quit",
             self.curses.A_REVERSE,
         )
         self.screen.refresh()
@@ -521,7 +521,7 @@ class GridViewer:
             self.put(
                 height - 1,
                 0,
-                f"{offset + 1}/{len(lines)}  ↑↓ / Space/b 翻页 · Home/End · q/Esc 返回",
+                f"{offset + 1}/{len(lines)}  ↑↓ / Space/b pages · Home/End · q/Esc back",
                 self.curses.A_REVERSE,
             )
             self.screen.refresh()
@@ -572,9 +572,9 @@ class GridViewer:
             value = scalar(self.table[name][self.rows[position]], 17, True)
             if self.query.casefold() in value.casefold():
                 self.row = position
-                self.notice = f"找到 {self.query!r} · 当前列 {name} · n 下一个"
+                self.notice = f"Found {self.query!r} · column {name} · n next"
                 return
-        self.notice = f"当前列 {name} 中没有 {self.query!r}"
+        self.notice = f"Column {name} has no match for {self.query!r}"
 
     def handle_key(self, key):
         """Allow other read-only table viewers to add navigation without duplicating this grid."""
@@ -624,14 +624,14 @@ class GridViewer:
             elif key in (self.curses.KEY_END, "G"):
                 self.row = len(self.rows) - 1
             elif key == "g" and self.rows:
-                value = self.prompt("跳到 row（0-based，Esc 取消）：")
+                value = self.prompt("Go to row (0-based, Esc cancels): ")
                 if value is not None:
                     try:
                         self.row = self.rows.index(int(value))
                     except ValueError:
-                        self.notice = "行号不在当前显示范围内"
+                        self.notice = "Row is outside the displayed range"
             elif key == "/":
-                query = self.prompt("在当前列搜索（Esc 取消）：")
+                query = self.prompt("Search current column (Esc cancels): ")
                 if query is not None:
                     self.query = query
                     self.find_next()
@@ -654,14 +654,14 @@ class GridViewer:
                 self.popup("Columns & units", text)
             elif key == "?":
                 self.popup(
-                    "按键帮助",
-                    "方向键：选择行 / 列\nSpace 或 PgDn：下一页\n"
-                    "b 或 PgUp：上一页（Mac 也可用 fn+↑/↓）\n[ / ]：横向翻页\n"
-                    "Home / H：第一行；End / G：最后一行\ng：输入行号（0-based）\n"
-                    "/：搜索当前列的完整值；n：下一个匹配\nEnter：查看当前单元格全文\n"
-                    "m：metadata；u：列名 / 类型 / 单位\n弹出视图中 q/Esc 返回表格\n"
-                    "表格中 q/Esc 或 Ctrl+C 退出并恢复原 terminal\n"
-                    "... 表示当前格显示不全，原值未修改；底部和 Enter 可查看原值。",
+                    "Keyboard help",
+                    "Arrow keys: select row / column\nSpace or PgDn: next page\n"
+                    "b or PgUp: previous page (Mac: fn+↑/↓)\n[ / ]: horizontal pages\n"
+                    "Home / H: first row; End / G: last row\ng: enter row number (0-based)\n"
+                    "/: search full values in current column; n: next match\nEnter: full cell value\n"
+                    "m: metadata; u: column names / types / units\nq/Esc in popups: return to table\n"
+                    "q/Esc or Ctrl+C in table: quit and restore terminal\n"
+                    "... marks a truncated display; values are unchanged. See the full value below or press Enter.",
                 )
             elif key == self.curses.KEY_MOUSE:
                 try:

@@ -1,7 +1,7 @@
-"""只读验收：用原生 LoadHDF5 读回 writer 输出，并与输入 trajectory 逐点核对。
+"""Read-only validation: load writer output with native LoadHDF5 and compare every input sample.
 
-这不是 SimFYST reader，也不生成新运动、intervals 或 detector pointing。
-成功时向 stdout 输出 JSON；失败时退出并显示不一致的字段。
+This is not the SimFYST reader; it generates no motion, intervals, or detector pointing.
+Print JSON to stdout on success; exit with mismatched fields on failure.
 """
 
 import argparse
@@ -24,19 +24,19 @@ def file_sha256(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "trajectory", type=Path, help="writer 使用的原始 trajectory ECSV"
+        "trajectory", type=Path, help="Original trajectory ECSV used by the writer"
     )
     parser.add_argument(
-        "output_dir", type=Path, help="包含 files.json 的 writer 输出目录"
+        "output_dir", type=Path, help="Writer output directory containing files.json"
     )
     args = parser.parse_args()
     source = args.trajectory.expanduser().resolve()
     folder = args.output_dir.expanduser().resolve()
     for path in (source, folder / "files.json"):
         if not path.is_file():
-            parser.error(f"找不到输入文件：{path}")
+            parser.error(f"Input file not found: {path}")
 
-    # 必须在数值库及 TOAST 导入前配置；不启动 MPI 或额外数值线程。
+    # Configure before numerical libraries and TOAST; disable MPI and extra numerical threads.
     for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ[key] = "1"
     os.environ["TOAST_LOGLEVEL"] = "WARNING"
@@ -59,24 +59,24 @@ def main():
     samples = QTable.read(source)
     blocks = samples.meta["blocks"]
     case = samples.meta["case"]
-    require(bool(blocks) and len(samples) > 0, "输入必须含非空 blocks / samples")
+    require(bool(blocks) and len(samples) > 0, "Input must contain nonempty blocks / samples")
     expected_names = [
         f"fyst_{case}_{b['scan_index']:03d}_{b['subscan_index']:03d}" for b in blocks
     ]
     names = json.loads((folder / "files.json").read_text())
     require(
         names == [f"{name}.h5" for name in expected_names],
-        "文件清单与 native blocks 不符",
+        "File manifest does not match native blocks",
     )
-    require(len(set(names)) == len(names), "文件清单含重复项")
+    require(len(set(names)) == len(names), "File manifest contains duplicates")
     paths = [folder / name for name in names]
     source_hash = file_sha256(source)
     original_hashes = {path: file_sha256(path) for path in paths}
 
-    # LoadHDF5(detdata=[]) 不载入 detector 数据；另查文件本身确实没有此数据。
+    # LoadHDF5(detdata=[]) skips detector data; also check that the files contain none.
     for path in paths:
         with h5py.File(path, "r") as saved:
-            require(len(saved["detdata"]) == 0, f"{path.name}: 文件中不应包含 detdata")
+            require(len(saved["detdata"]) == 0, f"{path.name}: File must not contain detdata")
 
     data = Data(Comm(world=None))
     try:
@@ -84,28 +84,28 @@ def main():
             files=[str(p) for p in paths], detdata=[], force_serial=True
         ).apply(data)
         observations = {obs.name: obs for obs in data.obs}
-        require(len(data.obs) == len(blocks), "Observation 数量与 native blocks 不符")
+        require(len(data.obs) == len(blocks), "Observation count does not match native blocks")
         require(
             set(observations) == set(expected_names),
-            "Observation 名称与 native blocks 不符",
+            "Observation names do not match native blocks",
         )
         reports = []
         offset = 0
         for block, name in zip(blocks, expected_names):
-            require(block["first"] == offset, f"{name}: 输入 block 切片不连续")
+            require(block["first"] == offset, f"{name}: Input block slices are not contiguous")
             offset = block["last"]
             part = samples[block["first"] : block["last"]]
             obs = observations[name]
-            require(obs.n_all_samples == len(part) > 0, f"{name}: 样本数不符")
-            require(len(obs.all_detectors) == 5, f"{name}: 应有五个示意 detectors")
-            require(len(obs.detdata) == 0, f"{name}: 读回后不应有 detdata")
+            require(obs.n_all_samples == len(part) > 0, f"{name}: Sample count mismatch")
+            require(len(obs.all_detectors) == 5, f"{name}: Expected five illustrative detectors")
+            require(len(obs.detdata) == 0, f"{name}: Loaded Observation must not contain detdata")
             info = json.loads(obs["trajectory_info"])
-            require(info["block"] == block, f"{name}: block metadata 不符")
-            require(info["source_sha256"] == source_hash, f"{name}: 输入文件 hash 不符")
-            require(info["case"] == case, f"{name}: pattern 名称不符")
+            require(info["block"] == block, f"{name}: Block metadata mismatch")
+            require(info["source_sha256"] == source_hash, f"{name}: Input file hash mismatch")
+            require(info["case"] == case, f"{name}: Pattern name mismatch")
             require(
                 info["start_utc"] == samples.meta["start_utc"],
-                f"{name}: start_utc 不符",
+                f"{name}: start_utc mismatch",
             )
             np.testing.assert_equal(
                 obs.telescope.focalplane.sample_rate.to_value(u.Hz),
@@ -114,20 +114,20 @@ def main():
 
             arrays = {key: np.asarray(obs.shared[key].data) for key in obs.shared}
             recorded = json.loads(obs["shared_array_sha256"])
-            # 新 writer 总是保存逐样本 boresight_roll（18 个字段）；旧 writer 的文件没有（17 个）。
+            # Current writers save per-sample boresight_roll (18 fields); older files omit it (17).
             has_roll = "boresight_roll" in arrays
             require(
                 len(arrays) == (18 if has_roll else 17) and set(arrays) == set(recorded),
-                f"{name}: shared 字段不符",
+                f"{name}: Shared field mismatch",
             )
             for key, values in arrays.items():
                 actual = hashlib.sha256(
                     np.ascontiguousarray(values).tobytes()
                 ).hexdigest()
-                require(actual == recorded[key], f"{name}/{key}: 保存前后 hash 不符")
-                require(np.isfinite(values).all(), f"{name}/{key}: 含非有限值")
+                require(actual == recorded[key], f"{name}/{key}: Hash changed after saving")
+                require(np.isfinite(values).all(), f"{name}/{key}: Contains nonfinite values")
 
-            # 独立比较原始 ECSV，避免仅相信 writer 自己保存的 hash。
+            # Compare directly with the original ECSV in addition to the writer's saved hashes.
             expected_arrays = {
                 "times": part["timestamp_unix_s"].to_value(u.s),
                 "azimuth": part["az_deg"].to_value(u.rad),
@@ -147,7 +147,7 @@ def main():
                     arrays[key], expected, err_msg=f"{name}/{key}"
                 )
             if has_roll:
-                # ECSV 有 roll 列就逐点对照；旧 ECSV 则应是 writer 记录的常数 roll_deg。
+                # Compare each ECSV roll sample, or the writer's constant roll_deg for legacy ECSV.
                 if "boresight_roll_deg" in part.colnames:
                     expected_roll = part["boresight_roll_deg"].to_value(u.rad)
                 else:
@@ -155,13 +155,13 @@ def main():
                 np.testing.assert_array_equal(
                     arrays["boresight_roll"], expected_roll, err_msg=f"{name}/boresight_roll"
                 )
-            require(np.all(np.diff(arrays["times"]) > 0), f"{name}: 时间不严格递增")
+            require(np.all(np.diff(arrays["times"]) > 0), f"{name}: Times are not strictly increasing")
             np.testing.assert_array_equal(arrays["scan_index"], block["scan_index"])
             np.testing.assert_array_equal(
                 arrays["subscan_index"], block["subscan_index"]
             )
 
-            # FYST enum 的各类别单独验收；TOAST 是 bitmask，不直接复制 enum。
+            # Check each FYST enum category separately; TOAST uses bitmasks, not raw enums.
             raw = np.asarray(part["scan_flag"])
             science = raw == SCAN_FLAG_SCIENCE
             turnaround = raw == SCAN_FLAG_TURNAROUND
@@ -175,7 +175,7 @@ def main():
             for key in ("boresight_azel", "boresight_radec"):
                 require(
                     arrays[key].shape == (len(part), 4),
-                    f"{name}/{key}: quaternion shape 不符",
+                    f"{name}/{key}: Quaternion shape mismatch",
                 )
                 np.testing.assert_allclose(
                     np.linalg.norm(arrays[key], axis=1), 1, rtol=0, atol=1e-12
@@ -188,7 +188,7 @@ def main():
             max_bore_error = float(
                 max(np.max(np.abs(az_error)), np.max(np.abs(el_error)))
             )
-            require(max_bore_error < 1e-9, f"{name}: boresight Az/El 与输入不符")
+            require(max_bore_error < 1e-9, f"{name}: Boresight Az/El does not match input")
             reports.append(
                 {
                     "name": name,
@@ -198,10 +198,10 @@ def main():
                 }
             )
 
-        require(offset == len(samples), "native blocks 没有覆盖全部输入")
+        require(offset == len(samples), "Native blocks do not cover the full input")
         require(
             all(file_sha256(p) == original_hashes[p] for p in paths),
-            "H5 在验证期间发生变化",
+            "H5 files changed during validation",
         )
         print(
             json.dumps(

@@ -108,7 +108,7 @@ def dataset_columns(dataset, prefix="", detector=None):
     schema_name = dataset.name + ".__table_column_meta__"
     if dataset.dtype.names and schema_name in dataset.file:
         lines = [decoded(line) for line in dataset.file[schema_name][:1000]]
-        # 只读普通列描述，不解析后面的 Astropy tagged metadata。
+        # Read plain column descriptions, not the following Astropy tagged metadata.
         schema = yaml.safe_load("\n".join(lines).split("\nmeta:", 1)[0]) or {}
         field_units = {field["name"]: field.get("unit") for field in schema.get("datatype", [])}
     fields = dataset.dtype.names or (None,)
@@ -135,8 +135,8 @@ def table_view(file, node="trajectory", detector=0):
     native = "toast_format_version" in file.attrs
     if node == "trajectory":
         if not native or "shared/times" not in file:
-            raise ValueError("这个文件没有 TOAST shared/times；请按 Tab 浏览 HDF5 结构")
-        # degree 列是界面转换，文件内 canonical Az/El 仍为 rad。
+            raise ValueError("No TOAST shared/times in this file; press Tab to browse the HDF5 tree")
+        # Degree columns are display conversions; canonical Az/El remain in radians.
         fields = [
             ("time_s", "fyst_time_s", "s", False),
             ("timestamp_unix_s", "times", "s", False),
@@ -165,7 +165,7 @@ def table_view(file, node="trajectory", detector=0):
     obj = file[node]
     if isinstance(obj, h5py.Group):
         if obj.name != "/shared" or "times" not in obj:
-            raise ValueError("Group 没有共同时间轴；可展开后打开 dataset，m 查看 attributes")
+            raise ValueError("Group has no shared time axis; expand it to open a dataset, or press m for attributes")
         count = len(obj["times"])
         columns = {}
         for name, dataset in obj.items():
@@ -179,7 +179,7 @@ def table_view(file, node="trajectory", detector=0):
     selected = None
     if obj.name.startswith("/detdata/") and obj.ndim >= 2:
         if not 0 <= detector < obj.shape[0]:
-            raise ValueError(f"detector index 应在 0–{obj.shape[0] - 1} 内")
+            raise ValueError(f"detector index must be in 0–{obj.shape[0] - 1}")
         selected = detector
     count = 1 if obj.shape == () else obj.shape[0 if selected is None else 1]
     meta = attributes(obj) | {
