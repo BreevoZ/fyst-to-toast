@@ -7,7 +7,9 @@ FYST plans the scan; TOAST uses those samples for pointing and downstream simula
 ## Status
 
 Experimental **0.1.0.dev0**, tested with **TOAST 3.0.5** and **FYST trajectories 0.11.0**.
-Trajectory input supports serial execution only. Scan-direction and Sun intervals,
+SimFYST is a standalone TOAST operator that reads FYST trajectory H5 files
+(CES, Daisy, Pong); for schedule-driven CES, use TOAST's own `SimGround` with the
+FYST schedule ECSV. SimFYST supports serial execution only. Scan-direction and Sun intervals,
 MPI, and a validated real focalplane with module clocking are not yet supported.
 The included focalplanes are demonstrations, not instrument models.
 
@@ -102,10 +104,11 @@ for the input contract.
 the FYST schedule. ECSV stores degrees; H5 stores radians. Convention
 `toast_q0_rz_local_z_v1` means
 `Q_bore = qa.from_lonlat_angles(-az, el, 0) * Rz(roll)`, rotating about local +Z.
-In FYST 0.11.0, schedule `boresight_angle` is a sky-frame angle including parallactic
-rotation, so it cannot be used directly as this local roll. See the
-[upstream correction proposal](https://github.com/ccatobs/fyst-trajectories/pull/2).
-TOAST handles the transformation to sky coordinates.
+TOAST handles the transformation to sky coordinates. In FYST 0.11.0 the schedule's
+`boresight_angle` is a sky-frame angle including parallactic rotation, so SimGround
+reading that schedule gets the wrong orientation; FYST main writes the TOAST roll
+there and keeps the sky angle in `field_rotation`
+([PR #2](https://github.com/ccatobs/fyst-trajectories/pull/2), merged after 0.11.0).
 
 **Clocking.** Apply each module's clocking `c` to its focalplane detector quaternion
 as `Rz(-c) * Q_fp`; it is not part of boresight roll. FYST's i1–i6 identify ring
@@ -132,7 +135,6 @@ Relative times and native block boundaries are retained.
 
 | Example | Purpose |
 |---|---|
-| [ces_baseline_vs_simground.py](examples/ces_baseline_vs_simground.py) | Compare a short schedule-driven CES in SimFYST and SimGround. |
 | [simfyst_from_h5.py](examples/simfyst_from_h5.py) | Load one trajectory block with a caller telescope and save an Observation. |
 | [pipeline_walkthrough.py](examples/pipeline_walkthrough.py) | Inspect generation, H5, loading, and roll geometry step by step. |
 | [downstream_maps.py](examples/downstream_maps.py) | Run native TOAST sky/noise and binned maps, with an optional CES SimGround comparison. |
@@ -155,6 +157,7 @@ instrument calibration or agreement between independent astrometry backends.
 ## License
 
 This repository uses the [BSD-2-Clause license](LICENSE).
-[src/fyst_to_toast/sim_fyst.py](src/fyst_to_toast/sim_fyst.py) is adapted from
-TOAST SimGround under [BSD-2-Clause](LICENSES/TOAST-BSD-2-Clause.txt), with the
+[src/fyst_to_toast/sim_fyst.py](src/fyst_to_toast/sim_fyst.py) is partly adapted from
+TOAST SimGround (some trait definitions, validators and operator scaffolding)
+under [BSD-2-Clause](LICENSES/TOAST-BSD-2-Clause.txt), with the
 [TOAST attribution](LICENSES/TOAST-AUTHORS.txt) retained.

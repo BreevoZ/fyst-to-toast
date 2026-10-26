@@ -127,7 +127,10 @@ overrides it for all samples and records that choice.
 `trajectory_info` and `source_shared_array_sha256` retain source provenance;
 `simfyst_info` records current geometry settings, rate checks, roll, and classifications.
 Multi-file input also records the original expanded input index.
-Without trajectory input, SimFYST retains its schedule-driven CES path.
+SimFYST has no schedule-driven path: it raises `ValueError` without trajectory input,
+and rejects unknown or removed SimGround parameters (schedule, scan rates, el_mod,
+elnod, HWP, weather, distribution, direction and Sun options) with `TypeError`.
+Schedule-driven CES uses TOAST's native `SimGround`.
 
 ## Flags, intervals, and limitations
 
@@ -137,8 +140,8 @@ The original enum is retained separately. SimFYST builds `scanning`, `turnaround
 and `fyst_invalid` intervals from contiguous integer `[first,last)` spans.
 These three classes partition the samples; direction and Sun intervals are not derived.
 
-Trajectory mode rejects weather, HWP, detector filtering/splitting, time distribution,
-and non-default motion-generation settings. Irregular clocks and MPI are unsupported.
+SimFYST rejects detector filtering, caller-site weather and MPI communicators.
+Irregular clocks and MPI are unsupported.
 Real focalplane geometry, module clocking, independent sky astrometry, and scan
 dynamics are not validated by this adapter. FYST dynamics warnings require separate
 assessment; successful file conversion is not a scan-feasibility check.
