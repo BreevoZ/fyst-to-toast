@@ -106,8 +106,6 @@ def quaternion_equal(actual, expected):
 def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
     spies = []
     for module, name in (
-        (sim_fyst, "simulate_ces_scan"),
-        (sim_fyst, "simulate_elnod"),
         (GroundSchedule, "read"),
     ):
         spy = Mock(side_effect=AssertionError(f"{name} must never run"))
@@ -226,7 +224,7 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
     }
 
 
-UNSUPPORTED = [
+REMOVED_SETTINGS = [
     ("schedule", GroundSchedule()),
     ("schedule_file", "unused.ecsv"),
     ("telescope_file", "unused.h5"),
@@ -254,6 +252,17 @@ UNSUPPORTED = [
     ("scan_rate_el", 2 * u.deg / u.s),
     ("scan_accel_az", 2 * u.deg / u.s**2),
     ("scan_accel_el", 2 * u.deg / u.s**2),
+]
+
+
+@pytest.mark.parametrize("key,value", REMOVED_SETTINGS)
+def test_removed_settings_rejected_at_construction(source, data, key, value):
+    with pytest.raises(TypeError, match=key):
+        SimFYST(telescope=caller(source), trajectory_file=str(source.path), **{key: value})
+    assert data.obs == []
+
+
+UNSUPPORTED = [
     ("times", "fyst_time_s"),
     ("times", schema.H5_BORESIGHT_ROLL),
     ("position", "azimuth"),
@@ -302,10 +311,11 @@ def test_unsupported_settings(source, data, key, value):
     ],
 )
 def test_hwp_settings(source, data, settings):
-    with pytest.raises(ValueError, match="hwp_"):
+    with pytest.raises(TypeError, match="hwp_") as error:
         SimFYST(
             telescope=caller(source), trajectory_file=str(source.path), **settings
-        ).apply(data)
+        )
+    assert all(key in str(error.value) for key in settings)
     assert data.obs == []
 
 
@@ -830,7 +840,7 @@ def test_multi_rejects_directory_and_glob(multi_telescope, data, tmp_path, entry
     assert data.obs == []
 
 
-@pytest.mark.parametrize("mode", ["data", "mpi", "schedule"])
+@pytest.mark.parametrize("mode", ["data", "mpi"])
 def test_multi_config_constraints(multi_telescope, data, mode):
     options = {"telescope": multi_telescope, "trajectory_files": MULTI_FIXTURES}
     if mode == "data":
@@ -838,15 +848,20 @@ def test_multi_config_constraints(multi_telescope, data, mode):
     elif mode == "mpi":
         data = SimpleNamespace(obs=[], comm=SimpleNamespace(
             comm_world=None, comm_group=None, world_size=2, group_size=1, ngroups=1))
-    else:
-        options["schedule_file"] = "not-used.ecsv"
     before = list(data.obs)
     try:
-        with pytest.raises(ValueError, match="empty data.obs|serial|schedule"):
+        with pytest.raises(ValueError, match="empty data.obs|serial"):
             SimFYST(**options)._exec(data)
         assert data.obs == before
     finally:
         data.obs.clear()
+
+
+def test_multi_schedule_rejected_at_construction(multi_telescope, data):
+    with pytest.raises(TypeError, match="schedule_file"):
+        SimFYST(telescope=multi_telescope, trajectory_files=MULTI_FIXTURES,
+                schedule_file="not-used.ecsv")
+    assert data.obs == []
 
 
 @pytest.mark.parametrize("failure_stage", ["constructor", "allocation"])
