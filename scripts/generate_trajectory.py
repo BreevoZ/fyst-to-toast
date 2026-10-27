@@ -19,6 +19,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 from fyst_to_toast.generate import (
     DEFAULT_DURATION_S,
+    DEFAULT_SAMPLE_RATE_HZ,
     DEFAULT_START,
     OUTPUT_NAMES,
     generate_trajectory,
@@ -38,6 +39,10 @@ def main():
         help=f"Scheduling window including overhead; default {DEFAULT_DURATION_S} s",
     )
     parser.add_argument(
+        "--sample-rate", type=float, default=DEFAULT_SAMPLE_RATE_HZ, metavar="HZ",
+        help=f"Requested trajectory sampling rate; default {DEFAULT_SAMPLE_RATE_HZ:g} Hz",
+    )
+    parser.add_argument(
         "--output-dir", type=Path, help="Default: output/generated/<case>/ in this repository"
     )
     parser.add_argument(
@@ -49,6 +54,8 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.duration_s) or args.duration_s <= 0:
         parser.error("duration-s must be finite and positive")
+    if not math.isfinite(args.sample_rate) or args.sample_rate <= 0:
+        parser.error("--sample-rate must be finite and positive")
     folder = (
         args.output_dir.expanduser().resolve()
         if args.output_dir
@@ -87,6 +94,7 @@ def main():
         folder,
         start=start,
         duration_s=args.duration_s,
+        sample_rate_hz=args.sample_rate,
         iers_file=iers_path,
         overwrite=args.overwrite,
     )

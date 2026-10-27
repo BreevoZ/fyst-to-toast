@@ -47,6 +47,7 @@ from .trajectory_h5 import (
     _TRAJECTORY_INFO_KEY,
     _boresight_with_roll,
     _check_sample_rate,
+    _SampleRateMismatch,
     _load_trajectory_block,
 )
 
@@ -471,11 +472,18 @@ class SimFYST(Operator):
             raise ValueError(
                 f"Caller site must match source site within 1 mm; distance={distance_m:.9g} m"
             )
-        rate_check = _check_sample_rate(
-            telescope.focalplane.sample_rate.to_value(u.Hz),
-            block.actual_rate_hz,
-            rtol=1e-6,
-        )
+        rate = telescope.focalplane.sample_rate.to_value(u.Hz)
+        checks = {}
+        for label, input_rate in (
+            (block.sample_rate_source, block.sample_rate_hz),
+            ("timestamps", block.actual_rate_hz),
+        ):
+            try:
+                checks[label] = _check_sample_rate(rate, input_rate, rtol=1e-6)
+            except _SampleRateMismatch as error:
+                raise _SampleRateMismatch(f"{source}: focalplane vs {label}: {error}") from error
+        rate_check = checks["timestamps"]
+        stored_rate_check = {**checks[block.sample_rate_source], "source": block.sample_rate_source}
         roll_override = None
         if self.trajectory_boresight_angle is not None:
             roll_override = self.trajectory_boresight_angle.to_value(u.rad)
@@ -485,6 +493,7 @@ class SimFYST(Operator):
             "source": source,
             "block": block,
             "rate_check": rate_check,
+            "stored_rate_check": stored_rate_check,
             "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "roll_override": roll_override,
         }
@@ -497,6 +506,8 @@ class SimFYST(Operator):
         for index, source in enumerate(self._trajectory_sources()):
             try:
                 item = self._load_validate_trajectory(source)
+            except _SampleRateMismatch:
+                raise
             except Exception as error:
                 if not multiple:
                     raise
@@ -527,7 +538,7 @@ class SimFYST(Operator):
             raise
 
     def _build_trajectory_observation(
-        self, data, source, block, rate_check, source_sha256, roll_override,
+        self, data, source, block, rate_check, stored_rate_check, source_sha256, roll_override,
         input_index=None,
     ):
         """Shared single-block construction after input validation (serial only)."""
@@ -592,6 +603,7 @@ class SimFYST(Operator):
             "first_time_unix_s": float(times[0]),
             "last_time_unix_s": float(times[-1]),
             "rate_check": rate_check,
+            "stored_rate_check": stored_rate_check,
             "max_phase_residual_s": block.max_phase_residual_s,
             "time_tolerance_s": block.time_tolerance_s,
             # Retain the scalar summary only when the whole series is constant.

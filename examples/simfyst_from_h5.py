@@ -65,7 +65,7 @@ def main():
     args = parser.parse_args()
     iers.conf.auto_download = False
     with solar_system_ephemeris.set("builtin"):
-        # Read only site coordinates from the source; the caller defines two detectors and a nominal 10 Hz rate.
+        # Read site and rate from the source; the caller defines two detectors.
         block = _load_trajectory_block(args.trajectory_file)
         site = GroundSite(
             "FYST-caller-site",
@@ -76,7 +76,7 @@ def main():
         telescope = Telescope(
             "FYST-caller-demo",
             site=site,
-            focalplane=fake_boresight_focalplane(n_pix=1, sample_rate=10 * u.Hz),
+            focalplane=fake_boresight_focalplane(n_pix=1, sample_rate=block.sample_rate_hz * u.Hz),
         )
         folder = args.output_dir.expanduser().resolve() / block.observation_name
         if folder.exists() and not args.overwrite:

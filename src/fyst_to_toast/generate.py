@@ -15,6 +15,7 @@ from pathlib import Path
 from fyst_to_toast import trajectory_h5 as schema
 
 DEFAULT_DURATION_S = 10800
+DEFAULT_SAMPLE_RATE_HZ = 10.0
 DEFAULT_START = {
     "ces": "2026-08-02T01:25:00",
     "daisy": "2026-03-15T04:00:00",
@@ -34,10 +35,13 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def build_legacy_patch(case):
+def build_legacy_patch(case, sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ):
     """Build legacy CES / Daisy or FYST's documented Pong as an ObservingPatch."""
     from fyst_trajectories.overhead import ObservingPatch
 
+    if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
+        raise ValueError("sample_rate_hz must be finite and positive")
+    timestep = 1.0 / sample_rate_hz
     if case not in DEFAULT_START:
         raise ValueError(f"Unknown case: {case}")
     if case == "ces":
@@ -50,7 +54,7 @@ def build_legacy_patch(case):
             scan_type="constant_el",
             velocity=1,
             elevation=50,
-            scan_params={"timestep": 0.1, "az_accel": 1.0},
+            scan_params={"timestep": timestep, "az_accel": 1.0},
         )
     elif case == "daisy":
         patch = ObservingPatch(
@@ -61,7 +65,7 @@ def build_legacy_patch(case):
             height=2,
             scan_type="daisy",
             velocity=0.3,
-            scan_params={"radius": 1, "turn_radius": 0.3, "timestep": 0.1},
+            scan_params={"radius": 1, "turn_radius": 0.3, "timestep": timestep},
         )
     else:
         # Field and pattern: FYST docs/trajectory_examples.rst:145-160 (f095c51).
@@ -78,7 +82,7 @@ def build_legacy_patch(case):
                 "spacing": 0.1,
                 "num_terms": 4,
                 "angle": 0.0,
-                "timestep": 0.1,
+                "timestep": timestep,
             },
         )
     return patch
@@ -225,7 +229,9 @@ def build_trajectory_table(case, science_timeline, pairs, source):
     return samples
 
 
-def _initial_report(case, timeline, start, duration_s, iers_path):
+def _initial_report(
+    case, timeline, start, duration_s, iers_path, sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ
+):
     from astropy.utils import iers
 
     import fyst_trajectories
@@ -245,6 +251,7 @@ def _initial_report(case, timeline, start, duration_s, iers_path):
         "window_start_utc": start.utc.isot,
         "window_stop_utc": timeline.end_time.utc.isot,
         "window_s": float(duration_s),
+        "requested_sample_rate_hz": float(sample_rate_hz),
         "scheduler_time_step_s": 30,
         "iers_file": str(iers_path) if iers_path else None,
         "iers_sha256": sha256(iers_path) if iers_path else None,
@@ -274,6 +281,7 @@ def generate_trajectory(
     *,
     start=None,
     duration_s=DEFAULT_DURATION_S,
+    sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
     iers_file=None,
     overwrite=False,
 ):
@@ -282,11 +290,12 @@ def generate_trajectory(
     IERS / ephemeris configuration belongs to the caller. ``iers_file`` records
     the caller's selected table and hash; it does not install that table.
     With no science, only the full timeline and a no_science report are written.
+    ``sample_rate_hz`` sets the requested FYST timestep to its reciprocal.
     """
     import numpy as np
     from astropy.time import Time
 
-    patch = build_legacy_patch(case)
+    patch = build_legacy_patch(case, sample_rate_hz=sample_rate_hz)
     start = Time(start or DEFAULT_START[case], scale="utc", precision=3)
     folder = Path(output_dir).expanduser().resolve()
     outputs = [folder / name for name in OUTPUT_NAMES]
@@ -300,7 +309,7 @@ def generate_trajectory(
             raise ValueError("Outputs must not overwrite the input IERS file")
 
     timeline = generate_observing_timeline(patch, start, duration_s)
-    report = _initial_report(case, timeline, start, duration_s, iers_path)
+    report = _initial_report(case, timeline, start, duration_s, iers_path, sample_rate_hz)
     if overwrite:
         # A no-science run must not leave a stale trajectory; never touch H5.
         for path in outputs:

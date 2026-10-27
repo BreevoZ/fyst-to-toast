@@ -197,6 +197,14 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
         "relative_error": abs(10 - actual_rate) / actual_rate,
         "rtol": 1e-6,
     }
+    stored_rate = json.loads(source.metadata["trajectory_info"])["sample_rate_hz"]
+    assert info["stored_rate_check"] == {
+        "nominal_rate_hz": 10.0,
+        "actual_rate_hz": stored_rate,
+        "relative_error": abs(10 - stored_rate) / stored_rate,
+        "rtol": 1e-6,
+        "source": "trajectory_info.sample_rate_hz",
+    }
     assert info["roll_deg"] == roll_deg
     assert info[schema.ROLL_SOURCE_KEY] == (
         schema.ROLL_SOURCE_LEGACY_SCALAR
@@ -357,7 +365,7 @@ def test_caller_rejections(source, data, mode):
         data.obs.append(object())
     before = list(data.obs)
     try:
-        with pytest.raises(ValueError, match=match):
+        with pytest.raises(RuntimeError if mode == "rate" else ValueError, match=match):
             SimFYST(telescope=telescope, trajectory_file=str(source.path)).apply(
                 data, **kwargs
             )
@@ -816,7 +824,7 @@ def test_multi_validation_is_atomic(multi_telescope, data, tmp_path, monkeypatch
         _load_trajectory_block(bad)
     build = Mock(side_effect=AssertionError("must validate all files before building"))
     monkeypatch.setattr(SimFYST, "_build_trajectory_observation", build)
-    with pytest.raises(ValueError) as error:
+    with pytest.raises(RuntimeError if defect == "rate" else ValueError) as error:
         SimFYST(telescope=multi_telescope, trajectory_files=[first, bad]).apply(data)
     assert bad.resolve().name in str(error.value)
     expected = {"name": "duplicate observation name", "overlap": "overlaps", "touching": "overlaps",

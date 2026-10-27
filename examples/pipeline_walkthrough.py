@@ -364,6 +364,7 @@ def run(args):
     step(1, "Native FYST (called by this repository)", f"case={args.case} → {generation}/schedule.ecsv", "Scheduling, overhead, science blocks")
     print("generate_trajectory performs Steps 1 and 2 together; inspect each file below without regenerating trajectories.")
     generated = generate_trajectory(args.case, generation, duration_s=args.duration_s,
+                                    sample_rate_hz=args.sample_rate,
                                     iers_file=iers.IERS_A_FILE, overwrite=args.overwrite)
     if generated["status"] != "complete":
         raise RuntimeError(f"No science in this window; inspect {generation}/full_timeline.ecsv and increase --duration-s.")
@@ -453,12 +454,13 @@ def run(args):
     obs_arrays, sim_summary = [], []
     fp_quat = xieta_to_quat(np.sin(np.deg2rad(1.0)), 0.0, 0.0)
     for path, block in zip(h5_paths, blocks, strict=True):
-        full_fp = fake_boresight_focalplane(n_pix=1, sample_rate=10 * u.Hz)
+        rate = block.sample_rate_hz * u.Hz
+        full_fp = fake_boresight_focalplane(n_pix=1, sample_rate=rate)
         table = full_fp.detector_data[:2].copy()
         table["name"] = ["caller-boresight", "caller-fyst-x-1deg"]
         table["quat"][0] = xieta_to_quat(0.0, 0.0, 0.0)
         table["quat"][1] = fp_quat
-        fp = Focalplane(detector_data=table, sample_rate=10 * u.Hz, field_of_view=3 * u.deg)
+        fp = Focalplane(detector_data=table, sample_rate=rate, field_of_view=3 * u.deg)
         site = GroundSite("caller-site", block.source_site["lat"], block.source_site["lon"], block.source_site["height"])
         telescope = Telescope("walkthrough-caller", site=site, focalplane=fp)
         data = Data(Comm(world=None))
@@ -566,11 +568,15 @@ def main():
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--duration-s", type=float, default=DEFAULT_DURATION_S,
                         help="Scheduling window including native overhead; default 6000 s, at least two science blocks")
+    parser.add_argument("--sample-rate", type=float, default=10.0, metavar="HZ",
+                        help="Requested trajectory sampling rate; default 10 Hz")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--no-gif", action="store_true")
     args = parser.parse_args()
     if not math.isfinite(args.duration_s) or args.duration_s <= 0:
         parser.error("duration-s must be finite and positive")
+    if not math.isfinite(args.sample_rate) or args.sample_rate <= 0:
+        parser.error("--sample-rate must be finite and positive")
     args.output_dir = (args.output_dir or REPO / "output/walkthrough" / args.case).expanduser().resolve()
     output_root = (REPO / "output").resolve()
     if not args.output_dir.is_relative_to(output_root) or args.output_dir == output_root:

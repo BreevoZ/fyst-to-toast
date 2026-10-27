@@ -26,6 +26,9 @@ with default overhead settings, then reconstructs science trajectories from the
 written schedule. It preserves scan/subscan IDs, samples, and block boundaries.
 The default window is 10800 seconds, including overhead. A window without science
 produces only the full timeline and a report; the CLI exits unsuccessfully.
+`generate_trajectory(sample_rate_hz=10.0)` / `--sample-rate HZ` sets the requested
+FYST scan timestep to `1 / sample_rate_hz` for all three cases. The rate must be
+finite and positive; the report records `requested_sample_rate_hz`.
 
 | ECSV columns | Units and meaning |
 |---|---|
@@ -81,6 +84,8 @@ Default writer output contains 18 shared arrays:
 Shared datasets do not carry unit attributes; units are part of this contract.
 JSON `trajectory_info` records the input hash, case, start time, block, roll
 source/convention, sample rate, and adapter policies.
+`trajectory_info.sample_rate_hz` is `1 / block.native_timestep_s`, which may
+differ slightly from the requested rate because FYST supplies the native grid.
 JSON `shared_array_sha256` hashes each shared array's contiguous bytes.
 
 Per-sample ECSV roll takes precedence; a nonzero `--roll-deg` alongside it is rejected.
@@ -105,9 +110,18 @@ The actual rate is `(N-1)/(times[-1]-times[0])`; the grid is only a check.
 The loader returns owned copies of the 12 input arrays plus roll, then clears
 temporary TOAST storage.
 
-SimFYST additionally checks the caller's nominal sample rate:
-`abs(nominal-actual)/actual <= 1e-6`. The caller and source sites must be within
-1 mm in Earth-centered Cartesian coordinates. Neither check alters input samples.
+Like SimGround, SimFYST takes the nominal rate from
+`telescope.focalplane.sample_rate.to_value(u.Hz)`. It checks that rate against both
+`trajectory_info.sample_rate_hz` and the timestamp-derived actual rate, requiring
+`abs(nominal-compared)/compared <= 1e-6` for each. A mismatch raises `RuntimeError`
+with the file and both rates; malformed metadata and clocks still raise `ValueError`.
+If the stored rate is absent, legacy files fall back to the timestamp-derived rate.
+Both bundled fixtures have a stored rate. `simfyst_info.rate_check` records the
+timestamp comparison; `stored_rate_check` records the stored-rate comparison and
+its `source` (`trajectory_info.sample_rate_hz` or `timestamps` for the fallback).
+Both records contain `nominal_rate_hz`, the compared value as `actual_rate_hz`,
+`relative_error`, and `rtol`. The caller and source sites must be within 1 mm in
+Earth-centered Cartesian coordinates. These checks never alter input samples.
 
 ## SimFYST trajectory mode
 

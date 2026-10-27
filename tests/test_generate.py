@@ -29,6 +29,14 @@ from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.generate import build_trajectory_table, generate_trajectory
 
 
+@pytest.mark.parametrize("rate", [0, -1, np.nan, np.inf, -np.inf])
+def test_invalid_requested_sample_rate(tmp_path, rate):
+    folder = tmp_path / "generation"
+    with pytest.raises(ValueError, match="sample_rate_hz must be finite and positive"):
+        generate_trajectory("ces", folder, sample_rate_hz=rate)
+    assert not folder.exists()
+
+
 # Pong's documented night includes an initial planet calibration before science.
 @pytest.mark.parametrize("case,duration_s", [("ces", 1800), ("pong", 2400)])
 def test_ecsv_writer_contract(tmp_path, case, duration_s):

@@ -204,9 +204,10 @@ def comparison_figures(fyst, ground, angles, folder, patch, mode, noise, compare
 
 
 def caller_telescope(source):
-    site = _load_trajectory_block(source).source_site
+    block = _load_trajectory_block(source)
+    site = block.source_site
     focalplane = fake_hexagon_focalplane(
-        n_pix=7, width=0.4 * u.deg, sample_rate=10 * u.Hz,
+        n_pix=7, width=0.4 * u.deg, sample_rate=block.sample_rate_hz * u.Hz,
         psd_net=300e-6 * u.K * u.s**0.5, psd_fknee=0.05 * u.Hz,
         psd_fmin=0 * u.Hz, psd_alpha=1.0, random_seed=123456,
     )
@@ -423,7 +424,8 @@ def main():
     synthetic_sky(args.nside, sky_i, "I")
     print("Pipeline: SimFYST → DefaultNoiseModel → PointingDetectorSimple(boresight_radec) → PixelsHealpix")
     print("      → StokesWeights(IQU) → ScanHealpixMap → SimNoise(optional) → CovarianceAndHits → BinMap")
-    print(f"Serial, 14 detectors / 10 Hz; nside={args.nside}, NESTED / C; shared mask={SHARED_MASK} (includes turnaround=4); rcond={RCOND}")
+    rate_hz = telescope.focalplane.sample_rate.to_value(u.Hz)
+    print(f"Serial, 14 detectors / {rate_hz:g} Hz; nside={args.nside}, NESTED / C; shared mask={SHARED_MASK} (includes turnaround=4); rcond={RCOND}")
     print("CovarianceAndHits + BinMap bin directly without templates; plots mask unhit / ill-conditioned pixels, while FITS retain native zeros and include rcond.")
     report = {"case": args.case, "nside": args.nside, "noise": not args.no_noise,
               "shared_flag_mask": SHARED_MASK, "det_flag_mask": DET_MASK, "rcond_threshold": RCOND}

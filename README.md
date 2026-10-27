@@ -84,7 +84,7 @@ finally:
     data.clear()
 ```
 
-The focalplane sample rate must match the trajectory (10 Hz by default).
+Set `--sample-rate HZ` when generating (default 10); `telescope.focalplane.sample_rate` must match both the stored H5 rate and its timestamps within `rtol=1e-6`.
 Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGround does.
 
 ## What each Observation contains

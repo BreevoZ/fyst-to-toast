@@ -359,10 +359,10 @@ def test_committed_clock_and_nominal_rate(sample_path):
     assert numbers["nominal_rate_hz"] == 10
     assert numbers["actual_rate_hz"] == block.actual_rate_hz
     assert numbers["relative_error"] <= numbers["rtol"] == 1e-6
-    with pytest.raises(ValueError, match="Nominal sample rate 20.*actual"):
+    with pytest.raises(RuntimeError, match="Nominal sample rate 20.*actual"):
         _check_sample_rate(20, block.actual_rate_hz)
     if sample_path.name == "fyst_ces_000_001.h5":
-        with pytest.raises(ValueError, match="rtol 1e-08"):
+        with pytest.raises(RuntimeError, match="rtol 1e-08"):
             _check_sample_rate(10, block.actual_rate_hz, rtol=1e-8)
     assert _check_sample_rate(10, 10, rtol=0)["relative_error"] == 0
     print(f"{sample_path.name}: flags={expected['flags']}; 10 Hz PASS, 20 Hz rejected")

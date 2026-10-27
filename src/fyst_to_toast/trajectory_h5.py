@@ -139,6 +139,8 @@ class _TrajectoryBlock:
     source_shared_array_sha256: dict[str, str] | None
     source_site: dict[str, Quantity]
     actual_rate_hz: float
+    sample_rate_hz: float
+    sample_rate_source: str
     max_phase_residual_s: float
     time_tolerance_s: float
     roll_source: str
@@ -233,6 +235,14 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
             raise ValueError("trajectory_info must contain a block object")  # noqa: TRY004
         actual_rate, residual, tolerance = _validate_trajectory_arrays(arrays, info["block"])
         n_samples = len(arrays["times"])
+        # Legacy files without the stored rate use the validated timestamp clock.
+        rate_source = "trajectory_info.sample_rate_hz" if "sample_rate_hz" in info else "timestamps"
+        sample_rate = info.get("sample_rate_hz", actual_rate)
+        if (
+            isinstance(sample_rate, bool) or not isinstance(sample_rate, (int, float))
+            or not np.isfinite(sample_rate) or sample_rate <= 0
+        ):
+            raise ValueError("trajectory_info.sample_rate_hz must be finite and positive")
 
         if H5_BORESIGHT_ROLL in arrays:
             _validate_boresight_roll(arrays[H5_BORESIGHT_ROLL], n_samples)
@@ -283,6 +293,8 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
                 "height": location.height.copy(),
             },
             actual_rate_hz=actual_rate,
+            sample_rate_hz=float(sample_rate),
+            sample_rate_source=rate_source,
             max_phase_residual_s=residual,
             time_tolerance_s=tolerance,
             roll_source=roll_source,
@@ -314,6 +326,10 @@ def _validate_clock(times: np.ndarray) -> tuple[float, float, float]:
     return actual_rate, residual, tolerance
 
 
+class _SampleRateMismatch(RuntimeError):
+    """A valid positive rate disagrees with the caller's focalplane rate."""
+
+
 def _check_sample_rate(
     nominal_rate_hz: float, actual_rate_hz: float, *, rtol: float = 1e-6
 ) -> dict[str, float]:
@@ -333,7 +349,7 @@ def _check_sample_rate(
         raise ValueError("sample-rate rtol must be finite and nonnegative")
     relative_error = abs(nominal - actual) / actual
     if relative_error > tolerance:
-        raise ValueError(
+        raise _SampleRateMismatch(
             f"Nominal sample rate {nominal:.12g} Hz does not match actual "
             f"{actual:.12g} Hz: relative error {relative_error:.9g} > rtol {tolerance:g}"
         )
