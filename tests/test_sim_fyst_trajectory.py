@@ -224,6 +224,8 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
         op.scanning_interval,
         op.turnaround_interval,
         op.fyst_invalid_interval,
+        defaults.throw_interval,
+        *sim_fyst._EMPTY_INTERVAL_NAMES,
     }
 
 
@@ -277,6 +279,9 @@ UNSUPPORTED = [
     ("scanning_interval", ""),
     ("turnaround_interval", "scanning"),
     ("fyst_invalid_interval", "ALL_OBSERVATION_SAMPLES"),
+    ("scanning_interval", defaults.throw_interval),
+    ("turnaround_interval", defaults.sun_up_interval),
+    ("fyst_invalid_interval", defaults.scan_rightleft_interval),
     ("turnaround_mask", -1),
     ("turnaround_mask", 256),
 ]
@@ -584,11 +589,15 @@ def assert_motion_classification(obs, op, raw):
     assert set(obs.intervals) == {
         "ALL_OBSERVATION_SAMPLES",
         *(key for key, _ in masks.values()),
+        defaults.throw_interval,
+        *sim_fyst._EMPTY_INTERVAL_NAMES,
     }
     info = json.loads(obs["simfyst_info"])
     assert (
         info["flags/intervals"]
-        == "motion derived (B2.3); solar/directions not yet derived"
+        == "motion derived (B2.3); throw splits turnarounds at time midpoints, "
+        "with block/invalid cuts and partial edge pieces retained; nine "
+        "fixed TOAST direction, elnod and Sun intervals remain empty (IV1)"
     )
     assert info["flag_mapping"] == {
         str(SCAN_FLAG_SCIENCE): 0,

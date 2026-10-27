@@ -9,7 +9,8 @@ FYST plans the scan; TOAST uses those samples for pointing and downstream simula
 Experimental **0.1.0.dev0**, tested with **TOAST 3.0.5** and **FYST trajectories 0.11.0**.
 SimFYST is a standalone TOAST operator that reads FYST trajectory H5 files
 (CES, Daisy, Pong); for schedule-driven CES, use TOAST's own `SimGround` with the
-FYST schedule ECSV. SimFYST supports serial execution only. Scan-direction and Sun intervals,
+FYST schedule ECSV. SimFYST supports serial execution only. Scan-direction,
+elnod and Sun intervals exist as empty v1 placeholders; their classifications,
 MPI, and a validated real focalplane with module clocking are not yet supported.
 The included focalplanes are demonstrations, not instrument models.
 The CES downstream comparison checks native SimGround ECSV against SimFYST H5:
@@ -133,6 +134,12 @@ The default mapping in the tested TOAST version is:
 
 Raw enums are preserved. SimFYST derives intervals from contiguous sample runs
 using half-open `[first, last)` spans; the turnaround mask is configurable.
+`throw` splits turnarounds at their time midpoints, following TOAST's time-to-sample
+rule: half turn + scan + half turn. Block edges and invalid samples also cut throws;
+partial edge pieces are retained. The other nine TOAST-default names stay empty,
+so `throw` is not their union. Names are fixed, with no new traits. Scan metadata uses
+valid motion: mean `scan_el` in deg, min/max bounds in rad (all Quantities), with
+azimuth unwrapped on its native branch. See [architecture](docs/architecture.md#flags-intervals-and-limitations).
 
 **Time.** Absolute sample times are float64 Unix seconds. Generated UTC strings
 are rendered to milliseconds; this display precision does not round sample arrays.

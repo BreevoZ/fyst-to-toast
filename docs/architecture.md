@@ -144,7 +144,23 @@ Default TOAST masks map science enum 1 to 0, turnaround enum 2 to 4, and
 unclassified/retune enums 0/3 to 1; the turnaround mask is configurable.
 The original enum is retained separately. SimFYST builds `scanning`, `turnaround`,
 and `fyst_invalid` intervals from contiguous integer `[first,last)` spans.
-These three classes partition the samples; direction and Sun intervals are not derived.
+`throw` runs between turnaround time midpoints: half turn + scan + half turn,
+using TOAST's left-search time-to-sample conversion. Block edges and invalid samples
+also cut throws; even truncated turnarounds are split at their observed midpoint,
+retaining partial edge pieces. Throws partition scanning + turnaround without
+overlap, including the final sample. The same rule applies to Daisy/Pong:
+few or no flagged turns produce long throws, while frequent turns split them.
+Midpoints follow flagged time spans and are not adjusted to sampled azimuth extrema.
+
+The nine direction-throw, scan/turn direction, elnod and Sun names remain empty;
+`throw` is not their union, and direction/Sun classifications remain unavailable.
+All ten names use fixed TOAST defaults, with no new traits or alias collisions.
+
+Metadata uses science + turnaround samples (all samples if none are valid):
+`scan_el` is mean elevation in deg for CES/Daisy/Pong; `scan_min_el`, `scan_max_el`,
+`scan_min_az`, `scan_max_az` are extrema in rad. All five are scalar Quantities.
+Azimuth is unwrapped before selection and retains the native branch, keeping
+FilterBin phase consistent with the unchanged shared arrays.
 
 SimFYST rejects detector filtering and MPI communicators.
 Irregular clocks and MPI are unsupported.

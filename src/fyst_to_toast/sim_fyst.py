@@ -59,6 +59,74 @@ def _mask_to_sample_spans(mask):
     )
 
 
+# Fixed compatibility names, not configurable motion classifications.
+_EMPTY_INTERVAL_NAMES = (
+    defaults.throw_leftright_interval,
+    defaults.throw_rightleft_interval,
+    defaults.scan_leftright_interval,
+    defaults.scan_rightleft_interval,
+    defaults.turn_leftright_interval,
+    defaults.turn_rightleft_interval,
+    defaults.elnod_interval,
+    defaults.sun_up_interval,
+    defaults.sun_close_interval,
+)
+
+
+def _throw_sample_spans(times, raw):
+    """Partition valid motion at turnaround time midpoints, as in SimGround.
+
+    Use the existing turnaround IntervalList's start/stop convention: the stop
+    is times[last], clipped to times[-1] at the block end. Convert each midpoint
+    with IntervalList's left search (TOAST 3.0.5 intervals.py:150-168), rather than
+    rounding a sample-index midpoint. Share that cut between adjacent sample spans
+    to avoid overlaps and retain the final sample. Block edges and invalid samples
+    also cut throws, retaining partial pieces of truncated turnarounds. The same
+    rule applies to CES, Daisy and Pong without inferring scan direction.
+    """
+    valid = np.isin(raw, (SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND))
+    turns = _mask_to_sample_spans(raw == SCAN_FLAG_TURNAROUND)
+    midpoints = [
+        0.5 * (times[first] + times[min(last, len(times) - 1)])
+        for first, last in turns
+    ]
+    splits = np.searchsorted(times, midpoints, side="left")
+    throws = []
+    for first, last in _mask_to_sample_spans(valid):
+        edges = [first, *splits[(splits > first) & (splits < last)].tolist(), last]
+        throws.extend(zip(edges[:-1], edges[1:]))
+    return throws
+
+
+def _scan_metadata(az, el, raw):
+    """Summarize valid motion, including turnarounds, in SimGround's units.
+
+    TOAST 3.0.5 sim_ground.py:677-679 stores angular Quantities; its final
+    AzimuthRanges call (890-896) includes turnarounds, excluding invalid samples
+    (azimuth_intervals.py:636-658). Use raw classes so a custom flag mask cannot
+    change this definition. An entirely invalid block falls back to all samples.
+    Daisy/Pong have no constant nominal elevation: use the sample mean in deg.
+
+    Unwrap the full azimuth series before selecting samples and retain its native
+    branch, including negative angles. FilterBin._get_phase (filterbin.py:1880)
+    unwraps that same series; shifting only the bounds by 2*pi would offset its
+    phase. Unlike AzimuthRanges' canonical branch, these bounds can be negative
+    or exceed 2*pi. Shared arrays are never changed.
+    """
+    valid = np.isin(raw, (SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND))
+    if not np.any(valid):
+        valid = np.ones(len(raw), dtype=bool)
+    az_scan = np.unwrap(az)[valid]
+    el_scan = el[valid]
+    return {
+        "scan_el": np.rad2deg(np.mean(el_scan)) * u.deg,
+        "scan_min_el": np.min(el_scan) * u.rad,
+        "scan_max_el": np.max(el_scan) * u.rad,
+        "scan_min_az": np.min(az_scan) * u.rad,
+        "scan_max_az": np.max(az_scan) * u.rad,
+    }
+
+
 @trait_docs
 class SimFYST(Operator):
     """Build CCAT Observations from native FYST trajectory HDF5 blocks.
@@ -67,6 +135,10 @@ class SimFYST(Operator):
     Preserve native samples and block boundaries, recompute geometry, and derive
     motion flags and intervals. Only serial execution is supported.
     Schedule-driven CES simulation belongs to TOAST's native SimGround.
+    Throws run between turnaround time midpoints, cut by block edges and invalids.
+    The nine direction, elnod and Sun intervals remain empty v1 placeholders, so
+    throw is not their union. All ten names use fixed TOAST defaults, with no new
+    traits or direction/Sun classifications.
     """
 
     # Class traits
@@ -328,7 +400,8 @@ class SimFYST(Operator):
             self.fyst_invalid_interval,
         )
         if len(set(intervals)) != 3 or any(
-            not key or key == "ALL_OBSERVATION_SAMPLES" for key in intervals
+            not key or key in ("ALL_OBSERVATION_SAMPLES", defaults.throw_interval)
+            or key in _EMPTY_INTERVAL_NAMES for key in intervals
         ):
             raise ValueError(
                 "trajectory interval names must be non-empty, distinct and not reserved"
@@ -531,7 +604,11 @@ class SimFYST(Operator):
             "caller_telescope": telescope.name,
             "caller_site": site.name,
             "coordinate_backend": backend,
-            "flags/intervals": "motion derived (B2.3); solar/directions not yet derived",
+            "flags/intervals": (
+                "motion derived (B2.3); throw splits turnarounds at time midpoints, "
+                "with block/invalid cuts and partial edge pieces retained; nine "
+                "fixed TOAST direction, elnod and Sun intervals remain empty (IV1)"
+            ),
             "flag_mapping": {
                 SCAN_FLAG_SCIENCE: 0,
                 SCAN_FLAG_TURNAROUND: int(self.turnaround_mask),
@@ -596,6 +673,13 @@ class SimFYST(Operator):
                 ob.intervals[key] = IntervalList(
                     times, samplespans=_mask_to_sample_spans(mask)
                 )
+            for key in _EMPTY_INTERVAL_NAMES:
+                ob.intervals[key] = IntervalList(times, samplespans=[])
+            ob.intervals[defaults.throw_interval] = IntervalList(
+                times, samplespans=_throw_sample_spans(times, raw)
+            )
+            for key, value in _scan_metadata(az, el, raw).items():
+                ob[key] = value
             info["class_counts"] = {
                 key: int(np.count_nonzero(mask)) for key, (mask, _) in classes.items()
             }
@@ -641,5 +725,7 @@ class SimFYST(Operator):
                 self.scanning_interval,
                 self.turnaround_interval,
                 self.fyst_invalid_interval,
+                defaults.throw_interval,
+                *_EMPTY_INTERVAL_NAMES,
             ],
         }
