@@ -52,7 +52,9 @@ Clocking belongs in each module's detector quaternions as `Rz(-c) * Q_fp`.
 An all-zero roll skips quaternion multiplication to preserve unrotated bytes.
 
 The writer CLI checks the schedule hash, nonempty contiguous block coverage,
-unique output names, and strictly increasing timestamps. It reads site coordinates
+unique output names, and strictly increasing timestamps. Before writing anything,
+it applies the loader's checks below to every block, so it never writes an H5 that
+SimFYST would reject. It reads site coordinates
 from schedule metadata. It does not split blocks, fill gaps, or resample.
 
 ## H5 arrays and metadata
@@ -96,7 +98,7 @@ array must have a matching hash.
 Present per-sample roll must be float64, finite, length `N`, with the supported
 convention and a nonempty source label.
 
-Times must strictly increase and follow a uniform clock. The maximum phase
+Times must be float64 Unix seconds, strictly increase and follow a uniform clock. The maximum phase
 residual against an endpoint-derived grid must be at most
 `max(1e-9, 2 * max(spacing(abs(times))))` seconds.
 The actual rate is `(N-1)/(times[-1]-times[0])`; the grid is only a check.
@@ -132,7 +134,9 @@ With `weather` set, each block gets a copied site and a TOAST `SimWeather` at it
 sample-time midpoint, with SimGround's name/file fallback, `realization`, `max_pwv`
 and `median_weather` settings. That site is used for geometry and the observation
 Telescope. `weather=None` preserves the caller site and any existing weather;
-the caller Telescope and site are not modified.
+the caller Telescope and site are not modified. As in SimGround, `max_pwv` truncates
+TOAST's process-wide weather tables, so later simulations in the same process inherit
+the cap ([TOAST issue 1](toast_issues.md)).
 SimFYST has no schedule-driven path: it raises `ValueError` without trajectory input,
 and rejects unknown or removed SimGround parameters (schedule, scan rates, el_mod,
 elnod, HWP, distribution, direction and Sun options) with `TypeError`.

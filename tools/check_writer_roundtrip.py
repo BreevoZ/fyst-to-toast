@@ -55,6 +55,7 @@ def main():
     from toast.observation import default_values as defaults
 
     from fyst_to_toast.fyst_flags import SCAN_FLAG_SCIENCE, SCAN_FLAG_TURNAROUND
+    from fyst_to_toast.trajectory_h5 import _load_trajectory_block
 
     samples = QTable.read(source)
     blocks = samples.meta["blocks"]
@@ -75,6 +76,8 @@ def main():
 
     # LoadHDF5(detdata=[]) skips detector data; also check that the files contain none.
     for path in paths:
+        # A successful round trip must also satisfy the actual SimFYST reader.
+        _load_trajectory_block(path)
         with h5py.File(path, "r") as saved:
             require(len(saved["detdata"]) == 0, f"{path.name}: File must not contain detdata")
 
@@ -146,12 +149,12 @@ def main():
                 np.testing.assert_array_equal(
                     arrays[key], expected, err_msg=f"{name}/{key}"
                 )
+            # Derive geometry from input roll, including legacy scalar-only H5.
+            if "boresight_roll_deg" in part.colnames:
+                expected_roll = part["boresight_roll_deg"].to_value(u.rad)
+            else:
+                expected_roll = np.full(len(part), np.radians(info["roll_deg"]))
             if has_roll:
-                # Compare each ECSV roll sample, or the writer's constant roll_deg for legacy ECSV.
-                if "boresight_roll_deg" in part.colnames:
-                    expected_roll = part["boresight_roll_deg"].to_value(u.rad)
-                else:
-                    expected_roll = np.full(len(part), np.radians(info["roll_deg"]))
                 np.testing.assert_array_equal(
                     arrays["boresight_roll"], expected_roll, err_msg=f"{name}/boresight_roll"
                 )
@@ -180,6 +183,22 @@ def main():
                 np.testing.assert_allclose(
                     np.linalg.norm(arrays[key], axis=1), 1, rtol=0, atol=1e-12
                 )
+            expected_bore = qa.mult(
+                qa.from_lonlat_angles(
+                    -part["az_deg"].to_value(u.rad),
+                    part["el_deg"].to_value(u.rad),
+                    np.zeros(len(part)),
+                ),
+                qa.rotation(np.array([0.0, 0.0, 1.0]), expected_roll),
+            )
+            quat_error = np.minimum(
+                np.linalg.norm(arrays["boresight_azel"] - expected_bore, axis=1),
+                np.linalg.norm(arrays["boresight_azel"] + expected_bore, axis=1),
+            )
+            require(
+                np.max(quat_error) < 1e-12,
+                f"{name}: Boresight quaternion orientation does not match input Az/El/roll",
+            )
             lon, lat, _ = qa.to_lonlat_angles(arrays["boresight_azel"])
             az_error = (
                 np.degrees(-lon) - part["az_deg"].to_value(u.deg) + 180

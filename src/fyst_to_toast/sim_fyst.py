@@ -294,7 +294,8 @@ class SimFYST(Operator):
         return use_qpoint
 
     @traitlets.validate("so3g_compat_mode")
-    def _check_use_qpoint(self, proposal):
+    def _check_so3g_compat_mode(self, proposal):
+        # TOAST SimGround 3.0.5 also duplicates the _check_use_qpoint method name.
         log = Logger.get()
         so3g_compat_mode = proposal["value"]
         if so3g_compat_mode:

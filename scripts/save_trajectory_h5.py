@@ -95,6 +95,8 @@ def main():
         ROLL_CONVENTION_KEY,
         ROLL_SOURCE_KEY,
         _roll_from_ecsv,
+        _trajectory_arrays_from_ecsv,
+        _validate_trajectory_arrays,
         write_trajectory_blocks,
     )
 
@@ -138,6 +140,13 @@ def main():
         )
     if offset != len(samples) or len(set(names)) != len(names):
         parser.error("Blocks must cover all samples; scan/subscan pairs must produce unique filenames")
+    # Validate every block before creating the output directory or writing files.
+    for block in samples.meta["blocks"]:
+        try:
+            part = samples[block["first"] : block["last"]]
+            _validate_trajectory_arrays(_trajectory_arrays_from_ecsv(part), block)
+        except (KeyError, TypeError, ValueError) as error:
+            parser.error(f"Block {block['scan_index']}/{block['subscan_index']}: {error}")
     if not np.all(np.diff(samples["timestamp_unix_s"].to_value(u.s)) > 0):
         parser.error("timestamps must be strictly increasing")
 

@@ -145,6 +145,54 @@ class _TrajectoryBlock:
     roll_convention: str
 
 
+def _validate_trajectory_arrays(arrays, block):
+    """Validate native input arrays and block count for both CLI and H5 loading."""
+    for key in _TRAJECTORY_FIELDS:
+        if key not in arrays:
+            raise ValueError(f"Missing trajectory field: {key}")
+    for key, values in arrays.items():
+        if values.ndim != 1:
+            raise ValueError(f"{key}: expected a 1-D array, got {values.shape}")
+        try:
+            finite = np.isfinite(values).all()
+        except TypeError as error:
+            raise ValueError(f"{key}: expected finite numeric values") from error
+        if not finite:
+            raise ValueError(f"{key}: all values must be finite")
+    n_samples = len(arrays["times"])
+    if n_samples < 2:
+        raise ValueError(f"Expected N >= 2 samples, got {n_samples}")
+    for key, values in arrays.items():
+        if len(values) != n_samples:
+            raise ValueError(f"{key}: length {len(values)} != N={n_samples}")
+    if block.get("samples") != n_samples:
+        raise ValueError(f"trajectory_info block.samples must equal N={n_samples}")
+    unknown = np.setdiff1d(arrays["fyst_scan_flag"], [0, 1, 2, 3])
+    if unknown.size:
+        raise ValueError(f"Unknown fyst_scan_flag values: {unknown.tolist()}")
+    return _validate_clock(arrays["times"])
+
+
+def _trajectory_arrays_from_ecsv(samples):
+    """Convert ECSV columns to the loader's native input names and units."""
+    from astropy import units as u
+
+    return dict(zip(_TRAJECTORY_FIELDS, (
+        samples[ECSV_TIMESTAMP_UNIX_S].to_value(u.s),
+        samples[ECSV_AZ_DEG].to_value(u.rad),
+        samples[ECSV_EL_DEG].to_value(u.rad),
+        samples[ECSV_TIME_S].to_value(u.s),
+        samples[ECSV_BLOCK_TIME_S].to_value(u.s),
+        samples[ECSV_AZ_DEG].to_value(u.deg),
+        samples[ECSV_EL_DEG].to_value(u.deg),
+        samples[ECSV_AZ_VELOCITY].to_value(u.deg / u.s),
+        samples[ECSV_EL_VELOCITY].to_value(u.deg / u.s),
+        np.asarray(samples[ECSV_SCAN_FLAG]),
+        np.asarray(samples[ECSV_SCAN_INDEX]),
+        np.asarray(samples[ECSV_SUBSCAN_INDEX]),
+    ), strict=True))
+
+
 def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
     """Read and validate one writer H5 without changing any input array bytes.
 
@@ -173,22 +221,7 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
         for key in fields:
             if key not in obs.shared:
                 raise ValueError(f"Missing trajectory field: {key}")
-            values = np.copy(obs.shared[key].data)
-            if values.ndim != 1:
-                raise ValueError(f"{key}: expected a 1-D array, got {values.shape}")
-            try:
-                finite = np.isfinite(values).all()
-            except TypeError as error:
-                raise ValueError(f"{key}: expected finite numeric values") from error
-            if not finite:
-                raise ValueError(f"{key}: all values must be finite")
-            arrays[key] = values
-        n_samples = len(arrays["times"])
-        if n_samples < 2:
-            raise ValueError(f"Expected N >= 2 samples, got {n_samples}")
-        for key, values in arrays.items():
-            if len(values) != n_samples:
-                raise ValueError(f"{key}: length {len(values)} != N={n_samples}")
+            arrays[key] = np.copy(obs.shared[key].data)
 
         raw_info = obs.get(_TRAJECTORY_INFO_KEY)
         try:
@@ -198,8 +231,8 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
         if not isinstance(info, dict) or not isinstance(info.get("block"), dict):
             # This is malformed file content, not a caller argument type error.
             raise ValueError("trajectory_info must contain a block object")  # noqa: TRY004
-        if info["block"].get("samples") != n_samples:
-            raise ValueError(f"trajectory_info block.samples must equal N={n_samples}")
+        actual_rate, residual, tolerance = _validate_trajectory_arrays(arrays, info["block"])
+        n_samples = len(arrays["times"])
 
         if H5_BORESIGHT_ROLL in arrays:
             _validate_boresight_roll(arrays[H5_BORESIGHT_ROLL], n_samples)
@@ -219,11 +252,6 @@ def _load_trajectory_block(path: str | Path) -> _TrajectoryBlock:
                 n_samples, np.deg2rad(scalar), dtype=np.float64
             )
             roll_source = ROLL_SOURCE_LEGACY_SCALAR
-
-        unknown = np.setdiff1d(arrays["fyst_scan_flag"], [0, 1, 2, 3])
-        if unknown.size:
-            raise ValueError(f"Unknown fyst_scan_flag values: {unknown.tolist()}")
-        actual_rate, residual, tolerance = _validate_clock(arrays["times"])
 
         manifest = None
         if _SHARED_ARRAY_SHA256_KEY in obs:
@@ -270,6 +298,8 @@ def _validate_clock(times: np.ndarray) -> tuple[float, float, float]:
     The reference grid is only a validation aid, never a replacement for times.
     Unix float quantization permits up to two ULPs (and at least 1 ns).
     """
+    if times.dtype != np.dtype(np.float64):
+        raise ValueError(f"times: expected float64 Unix seconds, got {times.dtype}")
     if not np.all(times[1:] > times[:-1]):
         raise ValueError("times must be strictly increasing")
     actual_rate = float((len(times) - 1) / (times[-1] - times[0]))
@@ -420,11 +450,8 @@ def write_trajectory_blocks(
         for block in samples.meta[ECSV_BLOCKS]:
             # Read the preserved block arrays without changing block boundaries.
             part = samples[block[ECSV_FIRST] : block[ECSV_LAST]]
-            times = part[ECSV_TIMESTAMP_UNIX_S].to_value(u.s)
-            az, el = (
-                part[ECSV_AZ_DEG].to_value(u.rad),
-                part[ECSV_EL_DEG].to_value(u.rad),
-            )
+            inputs = _trajectory_arrays_from_ecsv(part)
+            times, az, el = (inputs[key] for key in _TRAJECTORY_FIELDS[:3])
             dt = np.diff(part[ECSV_BLOCK_TIME_S].to_value(u.s))
             np.testing.assert_allclose(
                 dt, block[ECSV_NATIVE_TIMESTEP_S], rtol=0, atol=1e-9
@@ -456,7 +483,7 @@ def write_trajectory_blocks(
             position, velocity = site.position_velocity(times)
 
             # 3. FYST enum → TOAST bitmask; retain raw enums and turnaround samples.
-            original_flags = np.asarray(part[ECSV_SCAN_FLAG])
+            original_flags = inputs["fyst_scan_flag"]
             flags = to_toast_flags(
                 original_flags,
                 turnaround_mask=defaults.shared_mask_unstable_scanrate,
@@ -474,23 +501,7 @@ def write_trajectory_blocks(
                     "velocity": velocity,
                 }
             )
-            arrays.update(
-                zip(
-                    _TRAJECTORY_FIELDS[3:],
-                    (
-                        part[ECSV_TIME_S].to_value(u.s),
-                        part[ECSV_BLOCK_TIME_S].to_value(u.s),
-                        part[ECSV_AZ_DEG].to_value(u.deg),
-                        part[ECSV_EL_DEG].to_value(u.deg),
-                        part[ECSV_AZ_VELOCITY].to_value(u.deg / u.s),
-                        part[ECSV_EL_VELOCITY].to_value(u.deg / u.s),
-                        original_flags,
-                        np.asarray(part[ECSV_SCAN_INDEX]),
-                        np.asarray(part[ECSV_SUBSCAN_INDEX]),
-                    ),
-                    strict=True,
-                )
-            )
+            arrays.update({key: inputs[key] for key in _TRAJECTORY_FIELDS[3:]})
             arrays[H5_BORESIGHT_ROLL] = roll
             for key, values in arrays.items():
                 assert np.isfinite(values).all()

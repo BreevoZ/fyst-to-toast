@@ -465,6 +465,25 @@ def test_optional_manifest_and_enum_zero_three(ces_path, tmp_path):
     assert block.arrays["fyst_scan_flag"][:2].tolist() == [0, 3]
 
 
+@pytest.mark.parametrize("dtype", [np.float32, np.int64])
+def test_loader_rejects_non_float64_unix_clock(ces_path, tmp_path, dtype):
+    path = tmp_path / "imprecise-clock.h5"
+    shutil.copyfile(ces_path, path)
+    with h5py.File(path, "r+") as saved:
+        shared = saved["shared"]
+        n = len(shared["times"])
+        # float32 ULPs at this epoch formerly admitted 128 / 384 s intervals.
+        times = (1_700_000_000 + np.arange(n) * 256).astype(dtype)
+        times[1:-1:2] += 128
+        np.testing.assert_array_equal(np.unique(np.diff(times)), [128, 384])
+        attrs = dict(shared["times"].attrs)
+        del shared["times"]
+        shared.create_dataset("times", data=times).attrs.update(attrs)
+        refresh_manifest(saved)
+    with pytest.raises(ValueError, match=f"times: expected float64 Unix seconds, got {np.dtype(dtype)}"):
+        _load_trajectory_block(path)
+
+
 @pytest.mark.parametrize(
     "mode", ["success", "validation_error", "load_error", "zero", "two"]
 )

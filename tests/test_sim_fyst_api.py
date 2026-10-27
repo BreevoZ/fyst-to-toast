@@ -5,10 +5,12 @@ for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[key] = "1"
 
 import ast
+import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
+import traitlets
 from astropy import units as u
 from toast import Data
 from toast.instrument import GroundSite, Telescope
@@ -44,6 +46,44 @@ def test_exact_standalone_traits():
     assert len(OWN_TRAITS) == 27
     assert len(REMOVED_TRAITS) == 43
     assert set(SimFYST.class_trait_names()) == OWN_TRAITS | INHERITED_TRAITS
+
+
+@pytest.mark.parametrize("options", [
+    {"use_qpoint": True},
+    {"use_ephem": True, "use_qpoint": True},
+    {"use_qpoint": True, "use_ephem": True},
+])
+def test_conflicting_backends_at_construction(monkeypatch, options):
+    monkeypatch.setitem(sys.modules, "qpoint", ModuleType("qpoint"))
+    with pytest.raises(traitlets.TraitError, match="Cannot use both ephem and qpoint"):
+        SimFYST(**options)
+
+
+@pytest.mark.parametrize("initial,attribute", [
+    ({}, "use_qpoint"),
+    ({"use_ephem": False, "use_qpoint": True}, "use_ephem"),
+])
+def test_conflicting_backends_on_assignment(monkeypatch, initial, attribute):
+    monkeypatch.setitem(sys.modules, "qpoint", ModuleType("qpoint"))
+    op = SimFYST(**initial)
+    assert getattr(op, attribute) is False
+    with pytest.raises(traitlets.TraitError, match="Cannot use both ephem and qpoint"):
+        setattr(op, attribute, True)
+    assert getattr(op, attribute) is False
+
+
+def test_qpoint_and_so3g_validators_both_registered(monkeypatch):
+    monkeypatch.setitem(sys.modules, "qpoint", ModuleType("qpoint"))
+    op = SimFYST(use_ephem=False, use_qpoint=True)
+    assert op.use_qpoint and not op.use_ephem
+    compatible = SimFYST(so3g_compat_mode=True, use_qpoint=True)
+    assert compatible.so3g_compat_mode
+    # A missing optional backend must fail at configuration, not in geometry.
+    monkeypatch.setitem(sys.modules, "qpoint", None)
+    for options in ({"use_ephem": False, "use_qpoint": True},
+                    {"so3g_compat_mode": True}):
+        with pytest.raises(RuntimeError, match="Cannot use qpoint"):
+            SimFYST(**options)
 
 
 @pytest.mark.parametrize("name", REMOVED_TRAITS + ["unknown_parameter"])

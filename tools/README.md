@@ -33,6 +33,8 @@ The viewers use NumPy, Astropy, h5py, and PyYAML without importing TOAST.
 
 [check_writer_roundtrip.py](check_writer_roundtrip.py) uses TOAST LoadHDF5 to check
 writer output against its input ECSV, including hashes, flags, and geometry.
+Each file must also pass the SimFYST loader, and each boresight quaternion must match
+the one rebuilt from Az/El/roll (q and -q are equivalent).
 It prints JSON on success and exits with an error on mismatch.
 
 ```bash
