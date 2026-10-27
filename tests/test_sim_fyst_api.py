@@ -21,13 +21,14 @@ from fyst_to_toast.sim_fyst import SimFYST
 
 OWN_TRAITS = set("""
 API trajectory_file trajectory_files trajectory_boresight_angle telescope
+weather realization max_pwv median_weather
 use_ephem use_qpoint so3g_compat_mode times shared_flags det_data det_data_units
 det_flags azimuth elevation boresight_azel boresight_radec position velocity
 scanning_interval turnaround_interval fyst_invalid_interval turnaround_mask
 """.split())
 INHERITED_TRAITS = {"name", "enabled", "kernel_implementation", "timing", "timing_total"}
 REMOVED_TRAITS = """
-telescope_file session_split_key weather realization schedule schedule_file
+telescope_file session_split_key schedule schedule_file
 sort_schedule_file randomize_phase track_azimuth scan_rate_az fix_rate_on_sky
 scan_rate_el scan_accel_az scan_accel_el scan_cosecant_modulation sun_angle_min
 el_mod_step el_mod_rate el_mod_amplitude el_mod_sine el_mod_sine_phase
@@ -35,13 +36,13 @@ distribute_time detset_key hwp_angle hwp_rpm hwp_step hwp_step_time elnod_start
 elnod_end elnods elnod_every_scan throw_leftright_interval throw_rightleft_interval
 throw_interval scan_leftright_interval turn_leftright_interval scan_rightleft_interval
 turn_rightleft_interval elnod_interval sun_up_interval sun_close_interval
-sun_close_distance max_pwv median_weather sun_up_mask sun_close_mask elnod_mask
+sun_close_distance sun_up_mask sun_close_mask elnod_mask
 """.split()
 
 
 def test_exact_standalone_traits():
-    assert len(OWN_TRAITS) == 23
-    assert len(REMOVED_TRAITS) == 47
+    assert len(OWN_TRAITS) == 27
+    assert len(REMOVED_TRAITS) == 43
     assert set(SimFYST.class_trait_names()) == OWN_TRAITS | INHERITED_TRAITS
 
 

@@ -101,6 +101,10 @@ sample rate against each input. See [downstream_maps.py](examples/downstream_map
 for sky, noise, pointing, and binned maps, and [architecture](docs/architecture.md)
 for the input contract.
 
+Set `weather="atacama"` (or a weather HDF5 path) for TOAST `SimWeather` on a
+copied site per block, using the sample-time midpoint. `realization`, `max_pwv`,
+and `median_weather` follow SimGround; `weather=None` preserves caller-site weather.
+
 ## Conventions
 
 **Roll.** Per-sample `boresight_roll = -nasmyth_sign * El`, with the port read from

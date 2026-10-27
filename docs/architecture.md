@@ -115,8 +115,9 @@ Lists reject duplicate paths, directories, glob patterns, and nested manifests.
 Inputs must have unique Observation names and nonoverlapping sample time ranges.
 
 All inputs are validated first, then sorted by their first sample time.
-One caller-telescope Observation is built per native block. Construction is
-all-or-nothing: failure clears newly created Observations and leaves `data.obs` empty.
+One Observation with the caller's telescope name, UID and focalplane is built per
+native block. Construction is all-or-nothing: failure clears newly created
+Observations and leaves `data.obs` empty.
 The caller must provide empty Data, a GroundSite, and a nonempty focalplane,
 with no MPI communicator and world/group sizes of one.
 
@@ -127,9 +128,14 @@ overrides it for all samples and records that choice.
 `trajectory_info` and `source_shared_array_sha256` retain source provenance;
 `simfyst_info` records current geometry settings, rate checks, roll, and classifications.
 Multi-file input also records the original expanded input index.
+With `weather` set, each block gets a copied site and a TOAST `SimWeather` at its
+sample-time midpoint, with SimGround's name/file fallback, `realization`, `max_pwv`
+and `median_weather` settings. That site is used for geometry and the observation
+Telescope. `weather=None` preserves the caller site and any existing weather;
+the caller Telescope and site are not modified.
 SimFYST has no schedule-driven path: it raises `ValueError` without trajectory input,
 and rejects unknown or removed SimGround parameters (schedule, scan rates, el_mod,
-elnod, HWP, weather, distribution, direction and Sun options) with `TypeError`.
+elnod, HWP, distribution, direction and Sun options) with `TypeError`.
 Schedule-driven CES uses TOAST's native `SimGround`.
 
 ## Flags, intervals, and limitations
@@ -140,7 +146,7 @@ The original enum is retained separately. SimFYST builds `scanning`, `turnaround
 and `fyst_invalid` intervals from contiguous integer `[first,last)` spans.
 These three classes partition the samples; direction and Sun intervals are not derived.
 
-SimFYST rejects detector filtering, caller-site weather and MPI communicators.
+SimFYST rejects detector filtering and MPI communicators.
 Irregular clocks and MPI are unsupported.
 Real focalplane geometry, module clocking, independent sky astrometry, and scan
 dynamics are not validated by this adapter. FYST dynamics warnings require separate

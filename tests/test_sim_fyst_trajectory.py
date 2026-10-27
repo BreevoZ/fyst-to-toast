@@ -129,7 +129,10 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
     assert obs.session.name == source.name and obs.session.uid == name_UID(source.name)
     assert obs.session.start == datetime.fromtimestamp(t[0], tz=timezone.utc)
     assert obs.session.end == datetime.fromtimestamp(t[-1], tz=timezone.utc)
-    assert obs.telescope is telescope
+    assert obs.telescope is not telescope
+    assert obs.telescope.uid == telescope.uid
+    assert obs.telescope.focalplane is telescope.focalplane
+    assert obs.telescope.site is telescope.site
     assert obs.telescope.site.name == "caller-site"
     assert obs.telescope.name == "caller-telescope"
     assert obs.local_detectors == [f"caller-{i}" for i in range(2 * n_pix)]
@@ -231,9 +234,6 @@ REMOVED_SETTINGS = [
     ("distribute_time", True),
     ("detset_key", "band"),
     ("session_split_key", "band"),
-    ("weather", "atacama"),
-    ("max_pwv", 1 * u.mm),
-    ("median_weather", True),
     ("hwp_step_time", 1 * u.s),
     ("elnod_start", True),
     ("elnod_end", True),
@@ -320,7 +320,7 @@ def test_hwp_settings(source, data, settings):
 
 
 @pytest.mark.parametrize(
-    "mode", ["missing", "empty", "site", "weather", "rate", "detectors", "data"]
+    "mode", ["missing", "empty", "site", "rate", "detectors", "data"]
 )
 def test_caller_rejections(source, data, mode):
     telescope = caller(
@@ -333,7 +333,6 @@ def test_caller_rejections(source, data, mode):
         "missing": "caller.*Telescope",
         "empty": "non-empty.*focalplane",
         "site": "1 mm",
-        "weather": "site weather",
         "rate": "Nominal sample rate 20 Hz does not match actual",
         "detectors": "filtering",
         "data": "empty data.obs",
@@ -346,8 +345,6 @@ def test_caller_rejections(source, data, mode):
             sample_rate=10 * u.Hz,
             field_of_view=1 * u.deg,
         )
-    elif mode == "weather":
-        telescope.site.weather = object()
     elif mode == "detectors":
         kwargs["detectors"] = []
     elif mode == "data":

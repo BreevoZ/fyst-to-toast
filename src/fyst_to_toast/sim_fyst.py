@@ -3,11 +3,12 @@
 # a BSD-style license that can be found in the LICENSE file.
 # TOAST's LICENSE and AUTHORS for this file are in LICENSES/TOAST-BSD-2-Clause.txt and LICENSES/TOAST-AUTHORS.txt.
 
-# Some trait definitions, validators, and Operator scaffolding are adapted from
+# Some trait definitions, validators, weather setup, and Operator scaffolding are adapted from
 # TOAST SimGround. The trajectory-file path was added by this project.
 # Source: hpc4cmb/toast 9595449a,
 # src/toast/ops/sim_ground.py (sha256 eff1ac3ad41a9095670ba5357903581a4da01b1c6a75c37f8f236aef2cf2c4df).
 
+import copy
 import hashlib
 import json
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from toast.ops.operator import Operator
 from toast.timing import function_timer
 from toast.traits import Bool, Instance, Int, List, Quantity, Unicode, Unit, trait_docs
 from toast.utils import Logger, name_UID
+from toast.weather import SimWeather
 
 from .fyst_flags import (
     SCAN_FLAG_RETUNE,
@@ -87,6 +89,23 @@ class SimFYST(Operator):
 
     telescope = Instance(
         klass=Telescope, allow_none=True, help="This must be an instance of a Telescope"
+    )
+
+    weather = Unicode(
+        None,
+        allow_none=True,
+        help="Name of built-in weather site (e.g. 'atacama', 'south_pole') or path to HDF5 file",
+    )
+
+    realization = Int(0, help="The realization index")
+
+    max_pwv = Quantity(
+        None, allow_none=True, help="Maximum PWV for the simulated weather."
+    )
+
+    median_weather = Bool(
+        False,
+        help="Use median weather parameters instead of sampling from the distributions",
     )
 
     use_ephem = Bool(
@@ -285,9 +304,6 @@ class SimFYST(Operator):
             raise ValueError(
                 "trajectory mode does not support detector filtering (detectors)"
             )
-        if self.telescope.site.weather is not None:
-            raise ValueError("trajectory mode does not support caller site weather")
-
         names = self._trajectory_shared_names()
         if len(set(names.values())) != len(names):
             raise ValueError("trajectory shared output names must be distinct")
@@ -451,6 +467,34 @@ class SimFYST(Operator):
             roll_rad = np.full(len(block.arrays["times"]), roll_override, dtype=np.float64)
 
         times, az, el = (block.arrays[key] for key in _TRAJECTORY_FIELDS[:3])
+        if self.weather is not None:
+            # Match SimGround's per-session weather, using this block's sample midpoint.
+            site = copy.deepcopy(site)
+            mid_time = datetime.fromtimestamp(
+                times[0] + (times[-1] - times[0]) / 2, tz=timezone.utc
+            )
+            try:
+                weather = SimWeather(
+                    time=mid_time,
+                    name=self.weather,
+                    site_uid=site.uid,
+                    realization=self.realization,
+                    max_pwv=self.max_pwv,
+                    median_weather=self.median_weather,
+                )
+            except RuntimeError:
+                weather = SimWeather(
+                    time=mid_time,
+                    file=self.weather,
+                    site_uid=site.uid,
+                    realization=self.realization,
+                    max_pwv=self.max_pwv,
+                    median_weather=self.median_weather,
+                )
+            site.weather = weather
+        telescope = Telescope(
+            telescope.name, uid=telescope.uid, focalplane=telescope.focalplane, site=site
+        )
         position, velocity = site.position_velocity(times)
         bore_azel = _boresight_with_roll(az, el, roll_rad)
         backend = {
