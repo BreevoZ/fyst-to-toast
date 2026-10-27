@@ -67,3 +67,67 @@ def test_multi_block_downstream(mode, noise, tmp_path):
             assert walk.separation(row["center_deg"], walk.PATCHES["daisy"]) < tolerance
     finally:
         data.clear()
+
+
+@pytest.mark.parametrize("port,sign", [("right", 1), ("left", -1), ("cassegrain", 0)])
+@pytest.mark.parametrize("modern", [False, True])
+def test_schedule_roll_copy(tmp_path, port, sign, modern):
+    from astropy import units as u
+    from astropy.table import QTable
+
+    table = QTable({"el": [40., 60.] * u.deg,
+                    "boresight_angle": [12., 13.] * u.deg},
+                   meta={"site_nasmyth_port": port})
+    if modern:
+        table["field_rotation"] = [12., 13.] * u.deg
+    source = tmp_path / "source.ecsv"
+    table.write(source, format="ascii.ecsv")
+    original = source.read_bytes()
+    path, info = walk.prepare_simground_schedule(source, tmp_path / "out")
+    result = QTable.read(path, format="ascii.ecsv")
+    expected = [12., 13.] if modern else -sign * np.array([40., 60.])
+    np.testing.assert_array_equal(result["boresight_angle"].to_value(u.deg), expected)
+    assert info["boresight_angle_deg"] == list(expected)
+    assert (path == source) == modern
+    assert source.read_bytes() == original
+    path, info = walk.prepare_simground_schedule(source, tmp_path / "raw", "schedule")
+    assert path == source and info["boresight_angle_deg"] == [12., 13.]
+    assert not (tmp_path / "raw").exists()
+
+
+@pytest.mark.parametrize("port", [None, "unknown"])
+def test_schedule_roll_requires_port(tmp_path, port):
+    from astropy import units as u
+    from astropy.table import QTable
+
+    table = QTable({"el": [40.] * u.deg, "boresight_angle": [12.] * u.deg})
+    if port is not None:
+        table.meta["site_nasmyth_port"] = port
+    source = tmp_path / "source.ecsv"
+    table.write(source, format="ascii.ecsv")
+    with pytest.raises(ValueError, match="site_nasmyth_port"):
+        walk.prepare_simground_schedule(source, tmp_path / "out")
+
+
+def test_comparison_common_conditioning_and_robust_residual():
+    reference = np.zeros((3, 4))
+    fyst = {"hits": np.array([1, 2, 3, 4]), "rcond": np.array([0.1, 0.01, 0.1, 2e-8]),
+            "map": np.tile([2., 100., 200., 300.], (3, 1)), "center_deg": [0., 0.],
+            "noiseless": {"map": np.tile([1e-12, 1., 2., 3.], (3, 1))}}
+    ground = {**fyst, "rcond": np.array([0.1, 0.1, 0.001, 0.1]),
+              "map": np.tile([3., 400., 500., 600.], (3, 1))}
+    result = walk.compare_maps(fyst, ground, reference, True, compare_rcond=0.01)
+    assert result["comparison_pixels"] == 1  # Exact threshold and either bad side excluded.
+    assert result["noiseless_max_residual_simfyst_K"] == [1e-12] * 3
+    assert result["noiseless_max_residual_simground_K"] == [1e-12] * 3
+    assert result["noise_rms_simfyst_common_K"] == [2.] * 3
+    assert result["noise_rms_simground_common_K"] == [3.] * 3
+    assert result["noisy_difference_rms_common_K"] == [1.] * 3
+    np.testing.assert_allclose(result["noise_robust_simfyst_common_K"], [1.4826 * 2] * 3)
+    legacy = result["all_binned_pixels"]
+    assert legacy["label"] == "all binned pixels"
+    assert legacy["good_pixels_simfyst_simground_common"] == [4, 4, 4]
+    assert legacy["noiseless_max_residual_simfyst_K"] == [3.] * 3
+    np.testing.assert_allclose(legacy["noise_robust_simfyst_common_K"], [1.4826 * 150] * 3)
+    with pytest.raises(ValueError, match="No common pixels"):
+        walk.compare_maps(fyst, ground, reference, True, compare_rcond=0.5)

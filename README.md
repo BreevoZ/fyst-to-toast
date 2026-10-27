@@ -12,6 +12,9 @@ SimFYST is a standalone TOAST operator that reads FYST trajectory H5 files
 FYST schedule ECSV. SimFYST supports serial execution only. Scan-direction and Sun intervals,
 MPI, and a validated real focalplane with module clocking are not yet supported.
 The included focalplanes are demonstrations, not instrument models.
+The CES downstream comparison checks native SimGround ECSV against SimFYST H5:
+hits, noiseless/noisy I/Q/U and detector polarization angles. Legacy FYST schedule
+roll is corrected by default; `--simground-roll schedule` exposes the original roll.
 
 ## Install
 
@@ -137,7 +140,7 @@ Relative times and native block boundaries are retained.
 |---|---|
 | [simfyst_from_h5.py](examples/simfyst_from_h5.py) | Load one trajectory block with a caller telescope and save an Observation. |
 | [pipeline_walkthrough.py](examples/pipeline_walkthrough.py) | Inspect generation, H5, loading, and roll geometry step by step. |
-| [downstream_maps.py](examples/downstream_maps.py) | Run native TOAST sky/noise and binned maps, with an optional CES SimGround comparison. |
+| [downstream_maps.py](examples/downstream_maps.py) | Run native TOAST sky/noise and binned maps; `ces --compare-simground` compares hits, I/Q/U and ψ with corrected roll (or `--simground-roll schedule`). |
 
 [Tools](tools/README.md) provide read-only ECSV/HDF5 browsing and writer round-trip
 checks. Small [fixtures](data/README.md) allow H5 tests without generating new scans.

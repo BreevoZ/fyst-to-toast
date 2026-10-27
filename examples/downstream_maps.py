@@ -8,15 +8,16 @@ import argparse
 import json
 import os
 from pathlib import Path
+from tempfile import gettempdir
 import time
 
 for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[key] = "1"
 ROOT = Path(__file__).resolve().parents[1]
 for key, suffix in (("MPLCONFIGDIR", "matplotlib"), ("XDG_CACHE_HOME", "cache")):
-    cache = ROOT / "output/codex/DS1" / suffix
+    cache = Path(gettempdir()) / "fyst-to-toast" / suffix
     cache.mkdir(parents=True, exist_ok=True)
-    os.environ[key] = str(cache)
+    os.environ.setdefault(key, str(cache))
 
 import matplotlib
 matplotlib.use("Agg")
@@ -26,8 +27,9 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import solar_system_ephemeris
 from astropy.time import Time
+from astropy.table import QTable
 from astropy.utils import iers
-from toast import Data
+from toast import Data, qarray as qa
 from toast.instrument import GroundSite, Telescope
 from toast.instrument_sim import fake_hexagon_focalplane
 from toast.mpi import Comm
@@ -48,6 +50,157 @@ PATCHES = {"ces": (330.0, -50.0), "daisy": (180.0, -30.0), "pong": (180.0, -30.0
 SHARED_MASK = 15  # invalid | processing | unstable_scanrate | irregular; includes turnaround=4.
 DET_MASK = 7
 RCOND = 1e-8
+
+
+def prepare_simground_schedule(source, folder, mode="corrected"):
+    """Correct pre-field_rotation FYST schedules without importing FYST."""
+    source, folder = Path(source), Path(folder)
+    table = QTable.read(source, format="ascii.ecsv")
+    original = table["boresight_angle"].to_value(u.deg).tolist()
+    path = source
+    action = "original schedule"
+    if mode not in ("corrected", "schedule"):
+        raise ValueError(f"Unknown SimGround roll mode: {mode}")
+    if mode == "corrected" and "field_rotation" not in table.colnames:
+        port = table.meta.get("site_nasmyth_port")
+        signs = {"right": 1, "left": -1, "cassegrain": 0}
+        if port not in signs:
+            raise ValueError(f"Missing or unknown site_nasmyth_port: {port!r}")
+        table["boresight_angle"] = -signs[port] * table["el"].to(u.deg)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / "schedule_corrected.ecsv"
+        if path.resolve() == source.resolve():
+            raise ValueError("Corrected schedule output must differ from its source")
+        table.write(path, format="ascii.ecsv", overwrite=True)
+        action = "replaced boresight_angle with -nasmyth_sign * el"
+    elif mode == "corrected":
+        action = "field_rotation present; already corrected, unchanged"
+    return path, {"mode": mode, "action": action, "path": str(path),
+                  "original_boresight_angle_deg": original,
+                  "boresight_angle_deg": table["boresight_angle"].to_value(u.deg).tolist()}
+
+
+def polarization_histogram(data, quats):
+    """All detector samples, including turnarounds; ISO psi modulo 180 degrees.
+
+    TOAST qarray.to_iso_angles: local e_theta meridian toward detector +x,
+    right-handed about line of sight. With no HWP, COSMO StokesWeights uses
+    Q ~ cos(2 psi), U ~ -sin(2 psi). This is not IAU position angle.
+    """
+    edges = np.linspace(0, 360, 73)
+    counts = np.zeros(72, dtype=np.int64)
+    for obs in data.obs:
+        for det in obs.local_detectors:
+            psi = qa.to_iso_angles(obs.detdata[quats][det])[2]
+            counts += np.histogram(np.rad2deg(2 * psi) % 360, bins=edges)[0]
+    return {"edges_deg": edges.tolist(), "counts": counts.tolist(),
+            "probability": (counts / counts.sum()).tolist()}
+
+
+def apply_simground(data, telescope, schedule):
+    SimGround(telescope=telescope, schedule=schedule, weather=None,
+              scan_rate_az=1 * u.deg / u.s, scan_accel_az=1 * u.deg / u.s**2,
+              fix_rate_on_sky=False, randomize_phase=False).apply(data)
+
+
+def ground_angles(telescope, schedule):
+    data = Data(Comm(world=None))
+    try:
+        apply_simground(data, telescope, schedule)
+        PointingDetectorSimple(boresight="boresight_radec", quats="angle_quats",
+                               coord_in="C", coord_out="C", hwp_angle=None, shared_flags=None).apply(data)
+        return polarization_histogram(data, "angle_quats")
+    finally:
+        data.clear()
+
+
+def good_pixels(result):
+    return (result["hits"] > 0) & (result["rcond"] >= RCOND)
+
+
+def compare_maps(fyst, ground, reference, noise, compare_rcond=0.01):
+    a, b = fyst["hits"] > 0, ground["hits"] > 0
+    union = a | b
+    fg, gg = good_pixels(fyst), good_pixels(ground)
+    common = fg & gg
+    if not common.any():
+        raise ValueError("No common well-conditioned pixels for I/Q/U comparison")
+    def maximum(values, mask):
+        return np.max(np.abs(values[:, mask]), axis=1).tolist()
+    def rms(values, mask):
+        return np.sqrt(np.mean(values[:, mask] ** 2, axis=1)).tolist()
+    def robust(values, mask):
+        # Scale absolute residual about the known input, not about its median.
+        return (1.4826 * np.median(np.abs(values[:, mask]), axis=1)).tolist()
+    def statistics(fmask, gmask, shared):
+        return {
+            "good_pixels_simfyst_simground_common": [int(fmask.sum()), int(gmask.sum()), int(shared.sum())],
+            "noiseless_max_residual_simfyst_K": maximum(fyst["noiseless"]["map"] - reference, fmask),
+            "noiseless_max_residual_simground_K": maximum(ground["noiseless"]["map"] - reference, gmask),
+            "noiseless_max_difference_common_K": maximum(ground["noiseless"]["map"] - fyst["noiseless"]["map"], shared),
+            "noisy_difference_rms_common_K": rms(ground["map"] - fyst["map"], shared) if noise else None,
+            "noise_rms_simfyst_common_K": rms(fyst["map"] - reference, shared) if noise else None,
+            "noise_rms_simground_common_K": rms(ground["map"] - reference, shared) if noise else None,
+            "noise_robust_simfyst_common_K": robust(fyst["map"] - reference, shared) if noise else None,
+            "noise_robust_simground_common_K": robust(ground["map"] - reference, shared) if noise else None,
+        }
+    all_binned = {"label": "all binned pixels", "rcond_threshold": RCOND,
+                  "mask_policy": "Legacy: own hit pixels with rcond >= threshold for noiseless residuals; common pixels for differences and noise statistics.",
+                  **statistics(fg, gg, common)}
+    selected = common & (fyst["rcond"] > compare_rcond) & (ground["rcond"] > compare_rcond)
+    if not selected.any():
+        raise ValueError(f"No common pixels with rcond > {compare_rcond} for I/Q/U comparison")
+    return {
+        "hits_jaccard": float(np.count_nonzero(a & b) / union.sum()),
+        "hits_pearson_union": float(np.corrcoef(fyst["hits"][union], ground["hits"][union])[0, 1]),
+        "center_separation_deg": separation(fyst["center_deg"], ground["center_deg"]),
+        "compare_rcond": compare_rcond, "comparison_pixels": int(selected.sum()),
+        "mask_policy": "All primary I/Q/U statistics use the same common hit pixels with both rcond strictly above compare_rcond (and passing native binning threshold).",
+        "component_order": "I,Q,U; all residuals in K",
+        **statistics(selected, selected, selected),
+        "all_binned_pixels": all_binned,
+        "robust_definition": "1.4826 * median(abs(map - input)) per component; no median subtraction",
+        "interpretation": "Noiseless scan/bin closure uses each engine's own pointing, so small residuals alone do not validate roll; use the independent polarization comparison.",
+        "noise_policy": "All noise statistics use common pixels; realization=0, component=0, native observation UIDs (not paired noise).",
+        "motion": "Native turnaround, initial phase and endpoint sampling differ despite matching mount rate and acceleration.",
+    }
+
+
+def comparison_figures(fyst, ground, angles, folder, patch, mode, noise, compare_rcond=0.01):
+    folder.mkdir(parents=True, exist_ok=True)
+    selected = np.flatnonzero((fyst["hits"] > 0) | (ground["hits"] > 0))
+    projection = hp.projector.GnomonicProj(rot=patch)
+    x, y = projection.vec2xy(*hp.pix2vec(hp.get_nside(fyst["hits"]), selected, nest=True))
+    reso = float(np.rad2deg(max(np.max(np.abs(x)) / 300, np.max(np.abs(y)) / 225)) * 60 * 1.05)
+    def panel(values, mask, slot, title, unit, limits):
+        values = values.astype(float).copy()
+        values[~mask] = hp.UNSEEN
+        hp.gnomview(values, fig=plt.gcf().number, sub=slot, nest=True, rot=patch,
+                    xsize=600, ysize=450, reso=reso, title=title, unit=unit,
+                    min=limits[0], max=limits[1], notext=True)
+    fig = plt.figure(figsize=(14, 5))
+    limit = max(fyst["hits"].max(), ground["hits"].max())
+    for i, (label, result) in enumerate((("SimFYST", fyst), (f"SimGround ({mode})", ground)), 1):
+        panel(result["hits"], result["hits"] > 0, (1, 2, i), label + " hits", "hits", (0, limit))
+    fig.savefig(folder / "hits.png", dpi=140, bbox_inches="tight"); plt.close(fig)
+    fig = plt.figure(figsize=(16, 13))
+    fg = gg = good_pixels(fyst) & good_pixels(ground) & (fyst["rcond"] > compare_rcond) & (ground["rcond"] > compare_rcond)
+    for i, component in enumerate("IQU"):
+        lo, hi = np.percentile(np.concatenate((fyst["map"][i, fg], ground["map"][i, gg])) * 1e6, [1, 99])
+        for j, (label, result, mask) in enumerate((("SimFYST", fyst, fg), (f"SimGround ({mode})", ground, gg))):
+            panel(result["map"][i] * 1e6, mask, (3, 3, i * 3 + j + 1), f"{label}: {component}", "uK", (lo, hi))
+        diff = (ground["map"][i] - fyst["map"][i]) * 1e6
+        lim = max(float(np.percentile(np.abs(diff[fg & gg]), 99)), 1e-12)
+        panel(diff, fg & gg, (3, 3, i * 3 + 3), f"Ground - FYST: {component}", "uK", (-lim, lim))
+    fig.suptitle(("Noisy" if noise else "Noiseless") + f" I/Q/U; common pixels: both rcond > {compare_rcond:g}; display clipped at 1/99 percentiles (difference: 99% absolute)", y=1.02)
+    fig.savefig(folder / "iqu.png", dpi=140, bbox_inches="tight"); plt.close(fig)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for label, hist in angles.items():
+        ax.stairs(hist["probability"], hist["edges_deg"], label=label)
+    ax.set(xlabel="2 psi (degrees; TOAST ISO convention)", ylabel="Probability per 5-degree bin",
+           title="All detector samples, including turnarounds")
+    ax.legend(); fig.tight_layout()
+    fig.savefig(folder / "psi.png", dpi=140); plt.close(fig)
 
 
 def caller_telescope(source):
@@ -212,11 +365,13 @@ def simulate(telescope, manifest, sky_iqu, sky_i, nside, folder, patch, noise, s
         if schedule is None:
             SimFYST(telescope=telescope, trajectory_files=[str(manifest)]).apply(data)
         else:
-            SimGround(telescope=telescope, schedule=schedule, weather=None,
-                      scan_rate_az=1 * u.deg / u.s, scan_accel_az=1 * u.deg / u.s**2,
-                      fix_rate_on_sky=False, randomize_phase=False).apply(data)
+            apply_simground(data, telescope, schedule)
         layout = structure(data)
         result = run_chain(data, sky_iqu, nside, noise=noise)
+        PointingDetectorSimple(boresight="boresight_radec", quats="angle_quats",
+                               coord_in="C", coord_out="C", hwp_angle=None, shared_flags=None).apply(data)
+        result["angles"] = polarization_histogram(data, "angle_quats")
+        result["noiseless"] = run_chain(data, sky_iqu, nside, noise=False, prefix="noiseless")
         save_products(result, folder, patch)
         # Separate I-only, noise-free control on the same Observations; sky scanner
         # zeros signal. This is not an I projection of polarized/noisy TOD.
@@ -241,7 +396,13 @@ def main():
     parser.add_argument("--nside", type=int, default=256)
     parser.add_argument("--no-noise", action="store_true")
     parser.add_argument("--compare-simground", action="store_true")
+    parser.add_argument("--simground-roll", choices=("corrected", "schedule"), default="corrected",
+                        help="Correct legacy FYST schedule roll (default), or use schedule unchanged")
+    parser.add_argument("--compare-rcond", type=float, default=0.01,
+                        help="Require both rcond > threshold for comparison I/Q/U statistics and plots (default: 0.01)")
     args = parser.parse_args()
+    if not np.isfinite(args.compare_rcond) or not 0 <= args.compare_rcond < 1:
+        parser.error("--compare-rcond must be finite and in [0, 1)")
     if not hp.isnsideok(args.nside, nest=True):
         parser.error("--nside must be a power of two supported by HEALPix NESTED")
     if args.compare_simground and args.case != "ces":
@@ -258,7 +419,7 @@ def main():
     folder.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     sky_iqu, sky_i = folder / "input_IQU.fits", folder / "input_I.fits"
-    synthetic_sky(args.nside, sky_iqu)
+    reference = synthetic_sky(args.nside, sky_iqu)
     synthetic_sky(args.nside, sky_i, "I")
     print("Pipeline: SimFYST → DefaultNoiseModel → PointingDetectorSimple(boresight_radec) → PixelsHealpix")
     print("      → StokesWeights(IQU) → ScanHealpixMap → SimNoise(optional) → CovarianceAndHits → BinMap")
@@ -270,23 +431,29 @@ def main():
         report["simfyst"], fyst = simulate(telescope, manifest, sky_iqu, sky_i, args.nside,
                                           folder / "simfyst", PATCHES[args.case], not args.no_noise)
         if args.compare_simground:
-            schedule = GroundSchedule()
-            schedule.read(str(hdf5.parent / "schedule.ecsv"))
+            schedules, roll_info = {}, {}
+            for mode in ("corrected", "schedule"):
+                path, roll_info[mode] = prepare_simground_schedule(hdf5.parent / "schedule.ecsv", folder, mode)
+                schedules[mode] = GroundSchedule()
+                schedules[mode].read(str(path))
+            report["simground_roll"] = roll_info[args.simground_roll]
             report["simground"], ground = simulate(telescope, manifest, sky_iqu, sky_i, args.nside,
                                                    folder / "simground", PATCHES[args.case], not args.no_noise,
-                                                   schedule=schedule)
-            a, b = fyst["hits"] > 0, ground["hits"] > 0
-            f_intervals = set().union(*(row["intervals"] for row in report["simfyst"]["structure"]))
-            g_intervals = set().union(*(row["intervals"] for row in report["simground"]["structure"]))
-            report["comparison"] = {
-                "hits_jaccard": float(np.count_nonzero(a & b) / np.count_nonzero(a | b)),
-                "center_separation_deg": separation(fyst["center_deg"], ground["center_deg"]),
-                "intervals_only_in_simground": sorted(g_intervals - f_intervals),
-                "intervals_only_in_simfyst": sorted(f_intervals - g_intervals),
-                "schedule_boresight_angle_deg": [float(scan.boresight_angle.to_value(u.deg)) for scan in schedule.scans],
-                "note": "SimGround uses the FYST schedule's sky-frame boresight_angle as local roll (installed ops/sim_ground.py:771-776); compare only I / hits, not Q/U angles.",
-                "motion": "SimGround mount rate=1 deg/s, accel=1 deg/s², fix_rate_on_sky=False match the FYST CES parameters, but native turnaround / initial phase / endpoint sampling algorithms differ.",
+                                                   schedule=schedules[args.simground_roll])
+            other = "schedule" if args.simground_roll == "corrected" else "corrected"
+            histograms = {args.simground_roll: ground["angles"],
+                          other: ground_angles(telescope, schedules[other])}
+            angles = {"SimFYST": fyst["angles"], "SimGround (corrected)": histograms["corrected"],
+                      "SimGround (schedule)": histograms["schedule"]}
+            report["comparison"] = compare_maps(fyst, ground, reference, not args.no_noise, args.compare_rcond)
+            report["comparison"]["polarization"] = {
+                "convention": "TOAST qarray.to_iso_angles; ISO local e_theta to detector +x; COSMO Q~cos(2psi), U~-sin(2psi), no HWP. All samples, including turnarounds.",
+                "histogram_overlap_with_simfyst": {mode: float(np.minimum(fyst["angles"]["probability"], histograms[mode]["probability"]).sum()) for mode in histograms},
+                "schedule_minus_corrected_roll_deg": (np.array(roll_info["schedule"]["boresight_angle_deg"]) - np.array(roll_info["corrected"]["boresight_angle_deg"])).tolist(),
+                "rolls": roll_info, "histograms": angles,
             }
+            comparison_figures(fyst, ground, angles, folder / "figures", PATCHES[args.case],
+                               args.simground_roll, not args.no_noise, args.compare_rcond)
     report["elapsed_s"] = round(time.perf_counter() - started, 3)
     report["evidence"] = "Verified by execution"
     (folder / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
@@ -302,7 +469,9 @@ def main():
             for row in item["structure"]:
                 print(f"  {row['name']} / {row['samples']} samples; shared={row['shared']}; intervals={row['intervals']}")
     if "comparison" in report:
-        print("SimGround comparison: " + json.dumps(report["comparison"], ensure_ascii=False))
+        summary = dict(report["comparison"])
+        summary["polarization"] = {key: value for key, value in summary["polarization"].items() if key != "histograms"}
+        print("SimGround comparison: " + json.dumps(summary, ensure_ascii=False))
     print(f"Elapsed {report['elapsed_s']:.3f} s; files: {folder}/input_*.fits, simfyst/[hits,I,Q,U,rcond].fits, PNG, report.json (comparison also in simground/).")
 
 
