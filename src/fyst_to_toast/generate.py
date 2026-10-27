@@ -226,6 +226,8 @@ def build_trajectory_table(case, science_timeline, pairs, source):
 
 
 def _initial_report(case, timeline, start, duration_s, iers_path):
+    from astropy.utils import iers
+
     import fyst_trajectories
     from fyst_trajectories.overhead import io as overhead_io
 
@@ -246,7 +248,7 @@ def _initial_report(case, timeline, start, duration_s, iers_path):
         "scheduler_time_step_s": 30,
         "iers_file": str(iers_path) if iers_path else None,
         "iers_sha256": sha256(iers_path) if iers_path else None,
-        "iers_auto_download": False,
+        "iers_auto_download": iers.conf.auto_download,
         "block_counts": dict(Counter(str(b.block_type) for b in timeline.blocks)),
         "science_blocks": [
             {

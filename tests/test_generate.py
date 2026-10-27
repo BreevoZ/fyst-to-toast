@@ -113,3 +113,19 @@ def test_build_nasmyth_roll(tmp_path, port, sign):
     np.testing.assert_array_equal(roll.value, -sign * trajectory.el)
     assert roll.unit == u.deg and roll.dtype == np.float64
     assert samples.meta[schema.ROLL_NASMYTH_PORT_KEY] == port
+
+
+@pytest.mark.parametrize("auto_download", [False, True])
+def test_report_records_actual_iers_configuration(auto_download):
+    from fyst_trajectories.overhead import OverheadModel
+    from fyst_to_toast.generate import _initial_report
+
+    start = Time("2026-01-01", scale="utc")
+    timeline = SimpleNamespace(
+        science_blocks=[], blocks=[], overhead_model=OverheadModel(), end_time=start,
+    )
+    # Only report construction runs: enabling the setting never triggers a download.
+    with iers.conf.set_temp("auto_download", auto_download):
+        report = _initial_report("ces", timeline, start, 1.0, None)
+        assert report["iers_auto_download"] is auto_download
+        assert iers.conf.auto_download is auto_download

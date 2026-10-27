@@ -13,6 +13,8 @@ venv/
 htmlcov/
 .ipynb_checkpoints/
 .DS_Store
+.vscode/
+.idea/
 *.swp
 *.swo
 
@@ -28,13 +30,12 @@ outputs/
 .claude/settings.local.json
 
 
-# Local-only: agent instructions, learning notes, dated records and provenance.
-# Kept on disk for local use, never pushed (user decision 2026-10-18).
+# Local working notes, not distributed.
 AGENTS.md
 CLAUDE.md
 docs/steps/
 docs/records/
 docs/UPSTREAM.json
 
-# Historical FYST patches (local only; FYST >= 0.11 includes the fix)
+# Historical FYST patches; FYST >= 0.11 includes the fix.
 docs/patches/

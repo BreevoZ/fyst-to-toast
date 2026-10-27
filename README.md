@@ -21,15 +21,24 @@ Experimental **0.1.0.dev0**, tested with TOAST 3.0.5 and FYST trajectories 0.11.
 
 ## Install
 
-In a Python 3.10+ environment that already has TOAST (setuptools 77+):
+In a Python 3.10+ environment that already has TOAST (setuptools 77+), from a clone
+of this repository:
 
 ```bash
-python -m pip install --no-deps --no-build-isolation -e .   # SimFYST and H5 reading
-python -m pip install --no-build-isolation -e ".[fyst]"      # also FYST, for generation
+python -m pip install --no-deps --no-build-isolation -e .
 export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1  # before importing NumPy/TOAST
 ```
 
+This is enough to read H5 files and run SimFYST. Generating trajectories also needs
+FYST, which is installed from its release tag:
+
+```bash
+python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.11.0"
+```
+
 ## Quick start
+
+From the repository root:
 
 ```bash
 export RUN_DIR=output/quickstart
@@ -97,6 +106,7 @@ Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGro
 - **Time:** float64 Unix seconds, native samples and block boundaries; UTC strings use milliseconds.
 
 Contracts and limitations: [docs/architecture.md](docs/architecture.md).
+Upstream TOAST issues met along the way: [docs/toast_issues.md](docs/toast_issues.md).
 
 ## Examples and tools
 

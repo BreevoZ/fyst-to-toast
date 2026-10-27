@@ -5,23 +5,25 @@ import os
 for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
     os.environ[key] = "1"
 
+import hashlib
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import h5py
 import numpy as np
 import pytest
 from astropy import units as u
+from astropy.coordinates import solar_system_ephemeris
+from astropy.table import QTable
 from astropy.utils import iers
 from toast.intervals import IntervalList
 from toast.observation import default_values as defaults
 
 from fyst_to_toast.sim_fyst import SimFYST, _scan_metadata, _throw_sample_spans
+from fyst_to_toast import trajectory_h5 as schema
 from test_sim_fyst_trajectory import SAMPLES, caller, data
 
 iers.conf.auto_download = False
-ROOT = Path(__file__).resolve().parents[1]
 EMPTY_NAMES = {
     defaults.throw_leftright_interval, defaults.throw_rightleft_interval,
     defaults.scan_leftright_interval,
@@ -32,14 +34,33 @@ EMPTY_NAMES = {
 
 
 @pytest.mark.parametrize("case", ["fixture_ces", "fixture_daisy", "ces", "daisy", "pong"])
-def test_every_observation_intervals_and_metadata(case, data):
+def test_every_observation_intervals_and_metadata(case, data, tmp_path):
     if case.startswith("fixture_"):
         name = "fyst_ces_000_001.h5" if case == "fixture_ces" else "fyst_daisy_003_000.h5"
         paths = [SAMPLES / name]
     else:
-        manifest = ROOT / "output/generated" / case / "hdf5/files.json"
-        if not manifest.is_file():
-            pytest.skip(f"Optional generated {case} inputs are unavailable")
+        pytest.importorskip("fyst_trajectories", exc_type=ImportError)
+        from fyst_to_toast.generate import generate_trajectory
+
+        # First nonempty science windows on the scheduler's 30-second grid.
+        duration_s = {"ces": 1470, "daisy": 1500, "pong": 2280}[case]
+        with solar_system_ephemeris.set("builtin"):
+            report = generate_trajectory(case, tmp_path, duration_s=duration_s)
+            assert report["status"] == "complete"
+            source = tmp_path / "fyst_trajectory.ecsv"
+            samples = QTable.read(source)
+            site = QTable.read(tmp_path / "schedule.ecsv").meta
+            folder = tmp_path / "hdf5"
+            folder.mkdir()
+            names = schema.write_trajectory_blocks(
+                samples, site_name=str(site["site_name"]),
+                latitude_deg=site["site_lat"].to_value(u.deg),
+                longitude_deg=site["site_lon"].to_value(u.deg),
+                height_m=site["site_alt"].to_value(u.m), output_dir=folder,
+                source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            )
+        manifest = folder / "files.json"
+        manifest.write_text(json.dumps(names))
         paths = [manifest.parent / name for name in json.loads(manifest.read_text())]
     with h5py.File(paths[0], "r") as saved:
         telescope = caller(SimpleNamespace(site=dict(saved["instrument"].attrs)))
