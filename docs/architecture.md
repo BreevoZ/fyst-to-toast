@@ -49,6 +49,10 @@ nominal start/stop, actual first/last sample times, and native/requested timeste
 Absolute sample times retain their precision; generated UTC text uses milliseconds.
 
 Roll is `-nasmyth_sign * El`, excluding module clocking and parallactic rotation.
+FYST 0.12.0 writes this TOAST roll per schedule row into `boresight_angle`, marked
+by `boresight_angle_convention: toast_roll`. The example `downstream_maps.py`
+preserves marked schedules and corrects older (<= 0.11) schedules for SimGround.
+Per-row schedule roll does not replace per-sample roll for changing elevation.
 The convention `toast_q0_rz_local_z_v1` is
 `qa.from_lonlat_angles(-az, el, 0) * Rz(roll)`.
 Clocking belongs in each module's detector quaternions as `Rz(-c) * Q_fp`.

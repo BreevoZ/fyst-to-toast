@@ -20,8 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Used by fyst_to_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
-# 0.11.0 is the first release with UTC-offset ECSV times; no local patch is needed.
-fyst = ["fyst-trajectories>=0.11,<0.12"]
+# 0.12 marks schedule boresight_angle as the TOAST roll with a convention header.
+fyst = ["fyst-trajectories>=0.12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

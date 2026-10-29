@@ -43,8 +43,11 @@ def test_scan_flag_contract(name):
 
 
 @pytest.mark.parametrize("case", ["ces", "daisy"])
-def test_writer_site_contract(case, tmp_path):
-    """The writer CLI reads the same site from a schedule header as FYST does."""
+def test_writer_schedule_contract(case, tmp_path):
+    """FYST writes header-marked TOAST roll and the site the writer CLI reads."""
+    import numpy as np
+    from astropy import units as u
+    from astropy.table import QTable
     from astropy.time import Time
     from fyst_trajectories.overhead import read_timeline
 
@@ -69,3 +72,12 @@ def test_writer_site_contract(case, tmp_path):
         native.longitude,
         native.elevation,
     )
+    for name in ("full_timeline.ecsv", "schedule.ecsv"):
+        table = QTable.read(tmp_path / name, format="ascii.ecsv")
+        assert len(table) > 0
+        assert table.meta["boresight_angle_convention"] == "toast_roll"
+        assert "field_rotation" not in table.colnames
+        np.testing.assert_array_equal(
+            table["boresight_angle"].to_value(u.deg),
+            -native.nasmyth_sign * table["el"].to_value(u.deg),
+        )

@@ -71,28 +71,41 @@ def test_multi_block_downstream(mode, noise, tmp_path):
 
 @pytest.mark.parametrize("port,sign", [("right", 1), ("left", -1), ("cassegrain", 0)])
 @pytest.mark.parametrize("modern", [False, True])
-def test_schedule_roll_copy(tmp_path, port, sign, modern):
+@pytest.mark.parametrize("mode", ["corrected", "schedule"])
+def test_schedule_roll_copy(tmp_path, port, sign, modern, mode):
     from astropy import units as u
     from astropy.table import QTable
 
+    roll = -sign * np.array([40., 60.])
+    original_angles = roll if modern else np.array([12., 13.])
     table = QTable({"el": [40., 60.] * u.deg,
-                    "boresight_angle": [12., 13.] * u.deg},
+                    "boresight_angle": original_angles * u.deg},
                    meta={"site_nasmyth_port": port})
     if modern:
-        table["field_rotation"] = [12., 13.] * u.deg
+        table.meta["boresight_angle_convention"] = "toast_roll"
     source = tmp_path / "source.ecsv"
     table.write(source, format="ascii.ecsv")
     original = source.read_bytes()
-    path, info = walk.prepare_simground_schedule(source, tmp_path / "out")
+    path, info = walk.prepare_simground_schedule(source, tmp_path / "out", mode)
     result = QTable.read(path, format="ascii.ecsv")
-    expected = [12., 13.] if modern else -sign * np.array([40., 60.])
+    unchanged = modern or mode == "schedule"
+    expected = original_angles if unchanged else roll
     np.testing.assert_array_equal(result["boresight_angle"].to_value(u.deg), expected)
     assert info["boresight_angle_deg"] == list(expected)
-    assert (path == source) == modern
+    assert info["original_boresight_angle_deg"] == list(original_angles)
+    assert (path == source) == unchanged
     assert source.read_bytes() == original
-    path, info = walk.prepare_simground_schedule(source, tmp_path / "raw", "schedule")
-    assert path == source and info["boresight_angle_deg"] == [12., 13.]
-    assert not (tmp_path / "raw").exists()
+    if modern:
+        assert info["action"] == (
+            "boresight_angle is already the TOAST roll "
+            "(boresight_angle_convention = toast_roll); unchanged"
+        )
+    elif mode == "corrected":
+        assert info["action"] == "replaced boresight_angle with -nasmyth_sign * el"
+    else:
+        assert info["action"] == "original schedule"
+    if unchanged:
+        assert not (tmp_path / "out").exists()
 
 
 @pytest.mark.parametrize("port", [None, "unknown"])

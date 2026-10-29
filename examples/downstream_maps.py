@@ -53,7 +53,10 @@ RCOND = 1e-8
 
 
 def prepare_simground_schedule(source, folder, mode="corrected"):
-    """Correct pre-field_rotation FYST schedules without importing FYST."""
+    """Keep header-marked TOAST roll; correct legacy FYST <= 0.11 schedules.
+
+    The schedule mode passes either convention through unchanged.
+    """
     source, folder = Path(source), Path(folder)
     table = QTable.read(source, format="ascii.ecsv")
     original = table["boresight_angle"].to_value(u.deg).tolist()
@@ -61,7 +64,9 @@ def prepare_simground_schedule(source, folder, mode="corrected"):
     action = "original schedule"
     if mode not in ("corrected", "schedule"):
         raise ValueError(f"Unknown SimGround roll mode: {mode}")
-    if mode == "corrected" and "field_rotation" not in table.colnames:
+    if table.meta.get("boresight_angle_convention") == "toast_roll":
+        action = "boresight_angle is already the TOAST roll (boresight_angle_convention = toast_roll); unchanged"
+    elif mode == "corrected":
         port = table.meta.get("site_nasmyth_port")
         signs = {"right": 1, "left": -1, "cassegrain": 0}
         if port not in signs:
@@ -73,8 +78,6 @@ def prepare_simground_schedule(source, folder, mode="corrected"):
             raise ValueError("Corrected schedule output must differ from its source")
         table.write(path, format="ascii.ecsv", overwrite=True)
         action = "replaced boresight_angle with -nasmyth_sign * el"
-    elif mode == "corrected":
-        action = "field_rotation present; already corrected, unchanged"
     return path, {"mode": mode, "action": action, "path": str(path),
                   "original_boresight_angle_deg": original,
                   "boresight_angle_deg": table["boresight_angle"].to_value(u.deg).tolist()}
@@ -398,7 +401,8 @@ def main():
     parser.add_argument("--no-noise", action="store_true")
     parser.add_argument("--compare-simground", action="store_true")
     parser.add_argument("--simground-roll", choices=("corrected", "schedule"), default="corrected",
-                        help="Correct legacy FYST schedule roll (default), or use schedule unchanged")
+                        help="Correct legacy FYST schedule roll (default), or use schedule unchanged; "
+                             "both modes preserve header-marked TOAST roll")
     parser.add_argument("--compare-rcond", type=float, default=0.01,
                         help="Require both rcond > threshold for comparison I/Q/U statistics and plots (default: 0.01)")
     args = parser.parse_args()

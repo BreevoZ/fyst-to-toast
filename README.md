@@ -11,7 +11,7 @@ FYST scheduler ─► schedule.ecsv ──────────────�
 
 ## Status
 
-Experimental **0.1.0**, tested with TOAST 3.0.5 and FYST trajectories 0.11.0.
+Experimental **0.1.0**, tested with TOAST 3.0.5 and FYST trajectories 0.12.0.
 
 - Serial execution only (no MPI).
 - Included focalplanes are demonstrations; real Nasmyth ports and module clocking are not validated.
@@ -33,7 +33,7 @@ This is enough to read H5 files and run SimFYST. Generating trajectories also ne
 FYST, which is installed from its release tag:
 
 ```bash
-python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.11.0"
+python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.12.0"
 ```
 
 ## Quick start
@@ -99,9 +99,9 @@ Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGro
 ## Conventions
 
 - **Roll:** per sample, `boresight_roll = -nasmyth_sign * El`, with the port read from the
-  FYST schedule. FYST 0.11.0 schedules store a sky-frame angle in `boresight_angle`;
-  `downstream_maps.py` corrects it for SimGround, and FYST main fixes it
-  ([PR #2](https://github.com/ccatobs/fyst-trajectories/pull/2)).
+  FYST schedule. FYST 0.12.0 writes the TOAST roll into `boresight_angle`, marked by
+  `boresight_angle_convention: toast_roll`; `downstream_maps.py` preserves it and
+  corrects older (<= 0.11) schedules for SimGround.
 - **Clocking:** per module, in the focalplane detector quaternions as `Rz(-c) * Q_fp`, not in roll.
 - **Time:** float64 Unix seconds, native samples and block boundaries; UTC strings use milliseconds.
 

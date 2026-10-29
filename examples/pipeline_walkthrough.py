@@ -369,11 +369,15 @@ def run(args):
     if generated["status"] != "complete":
         raise RuntimeError(f"No science in this window; inspect {generation}/full_timeline.ecsv and increase --duration-s.")
     schedule = QTable.read(generation / "schedule.ecsv")
+    schedule_angle_label = (
+        "TOAST roll" if schedule.meta.get("boresight_angle_convention") == "toast_roll"
+        else "legacy sky-frame angle (includes the parallactic angle)"
+    )
     full = QTable.read(generation / "full_timeline.ecsv")
     timeline = read_timeline(generation / "full_timeline.ecsv")
     science = read_timeline(generation / "schedule.ecsv")
     print(f"[Verified] science blocks={len(schedule)}; window={args.duration_s:g} s")
-    print("scan/subscan  start UTC                         stop UTC                          Az min/max [deg]       El [deg]  sky boresight_angle [deg]")
+    print(f"scan/subscan  start UTC                         stop UTC                          Az min/max [deg]       El [deg]  boresight_angle [deg] ({schedule_angle_label})")
     for row in schedule:
         print(f"{row['scan_index']:3}/{row['subscan_index']:<3}  {row['start_time']}  {row['stop_time']}  "
               f"{row['azmin'].value:9.3f}/{row['azmax'].value:9.3f}  {row['el'].value:8.3f}  {row['boresight_angle'].value:10.6f}")
@@ -519,7 +523,7 @@ def run(args):
                                  0.0, schedule_angle)
     theta, poses, errors = comparison
     rho = np.rad2deg(arrays["boresight_roll"])
-    print(f"d. Roll: schedule boresight_angle={schedule_angle:.9f} deg (sky frame, one value per block, includes parallactic angle)")
+    print(f"d. Roll: schedule boresight_angle={schedule_angle:.9f} deg ({schedule_angle_label}; one value per block)")
     print(f"   FYST mechanical theta range={theta.min():.9f}..{theta.max():.9f} deg; TOAST rho range={rho.min():.9f}..{rho.max():.9f} deg")
     print(f"   Same sample {j}: El={arrays['fyst_el_deg'][j]:.9f}, theta={theta[j]:.9f}, rho={rho[j]:.9f} deg")
     for label, error in errors.items():
