@@ -11,7 +11,7 @@ FYST scheduler ─► schedule.ecsv ──────────────�
 
 ## Status
 
-Experimental **0.1.0**, tested with TOAST 3.0.5 and FYST trajectories 0.12.0.
+Experimental **0.1.1**, tested with TOAST 3.0.5 and FYST trajectories 0.12.0.
 
 - Serial execution only (no MPI).
 - Included focalplanes are demonstrations; real Nasmyth ports and module clocking are not validated.
