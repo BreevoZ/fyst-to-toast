@@ -43,7 +43,7 @@ def test_scan_flag_contract(name):
 
 
 @pytest.mark.parametrize("case", ["ces", "daisy"])
-def test_writer_schedule_contract(case, tmp_path):
+def test_writer_schedule_contract(case, tmp_path, quickstart):
     """FYST writes header-marked TOAST roll and the site the writer CLI reads."""
     import numpy as np
     from astropy import units as u
@@ -52,14 +52,13 @@ def test_writer_schedule_contract(case, tmp_path):
     from fyst_trajectories.overhead import read_timeline
 
     from fyst_to_toast.generate import (
-        DEFAULT_START,
-        build_legacy_patch,
         generate_observing_timeline,
         write_timeline_ecsv,
     )
 
-    start = Time(DEFAULT_START[case], scale="utc", precision=3)
-    timeline = generate_observing_timeline(build_legacy_patch(case), start, 1800)
+    start = Time(quickstart.DEFAULT_START[case], scale="utc", precision=3)
+    patch = quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ)
+    timeline = generate_observing_timeline(patch, start, 1800)
     write_timeline_ecsv(timeline, tmp_path)
     schedule = tmp_path / "full_timeline.ecsv"
     read_site_metadata = runpy.run_path(str(REPO / "scripts/save_trajectory_h5.py"))[

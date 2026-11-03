@@ -1,4 +1,7 @@
-"""Call FYST: scheduler inputs → native schedule → per-sample ECSV.
+"""Quick-start example: scheduler inputs → native schedule → per-sample ECSV.
+
+Users may write their own scripts that build an ObservingPatch and call
+generate_trajectory without editing src/.
 
 Adapted from the author's earlier local scheduling and trajectory examples.
 
@@ -18,12 +21,72 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 from fyst_to_toast.generate import (
-    DEFAULT_DURATION_S,
-    DEFAULT_SAMPLE_RATE_HZ,
-    DEFAULT_START,
     OUTPUT_NAMES,
     generate_trajectory,
 )
+
+
+DEFAULT_DURATION_S = 10800
+DEFAULT_SAMPLE_RATE_HZ = 10.0
+DEFAULT_START = {
+    "ces": "2026-08-02T01:25:00",
+    "daisy": "2026-03-15T04:00:00",
+    # FYST docs/trajectory_examples.rst:143 (f095c51).
+    "pong": "2026-03-15T01:00:00",
+}
+
+
+def example_patch(case, sample_rate_hz):
+    """Build a quick-start CES / Daisy or FYST's documented Pong patch."""
+    from fyst_trajectories.overhead import ObservingPatch
+
+    if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
+        raise ValueError("sample_rate_hz must be finite and positive")
+    timestep = 1.0 / sample_rate_hz
+    if case not in DEFAULT_START:
+        raise ValueError(f"Unknown case: {case}")
+    if case == "ces":
+        patch = ObservingPatch(
+            name="native CES",
+            ra_center=330,
+            dec_center=-50,
+            width=30,
+            height=8,
+            scan_type="constant_el",
+            velocity=1,
+            elevation=50,
+            scan_params={"timestep": timestep, "az_accel": 1.0},
+        )
+    elif case == "daisy":
+        patch = ObservingPatch(
+            name="native Daisy",
+            ra_center=180,
+            dec_center=-30,
+            width=2,
+            height=2,
+            scan_type="daisy",
+            velocity=0.3,
+            scan_params={"radius": 1, "turn_radius": 0.3, "timestep": timestep},
+        )
+    else:
+        # Field and pattern: FYST docs/trajectory_examples.rst:145-160 (f095c51).
+        # Native period is 240 s, within the default 3600 - 300 s subscan budget.
+        patch = ObservingPatch(
+            name="native Pong",
+            ra_center=180,
+            dec_center=-30,
+            width=2,
+            height=2,
+            scan_type="pong",
+            velocity=0.4,
+            scan_params={
+                "spacing": 0.1,
+                "num_terms": 4,
+                "angle": 0.0,
+                "timestep": timestep,
+            },
+        )
+    return patch
 
 
 def main():
@@ -89,12 +152,12 @@ def main():
         start = Time(args.start or DEFAULT_START[args.case], scale="utc", precision=3)
     except ValueError as error:
         parser.error(f"Cannot parse UTC start: {error}")
+    patch = example_patch(args.case, args.sample_rate)
     report = generate_trajectory(
-        args.case,
+        patch,
         folder,
         start=start,
         duration_s=args.duration_s,
-        sample_rate_hz=args.sample_rate,
         iers_file=iers_path,
         overwrite=args.overwrite,
     )

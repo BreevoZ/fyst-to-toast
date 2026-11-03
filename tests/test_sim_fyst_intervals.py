@@ -34,7 +34,7 @@ EMPTY_NAMES = {
 
 
 @pytest.mark.parametrize("case", ["fixture_ces", "fixture_daisy", "ces", "daisy", "pong"])
-def test_every_observation_intervals_and_metadata(case, data, tmp_path):
+def test_every_observation_intervals_and_metadata(case, data, tmp_path, quickstart):
     if case.startswith("fixture_"):
         name = "fyst_ces_000_001.h5" if case == "fixture_ces" else "fyst_daisy_003_000.h5"
         paths = [SAMPLES / name]
@@ -45,7 +45,10 @@ def test_every_observation_intervals_and_metadata(case, data, tmp_path):
         # First nonempty science windows on the scheduler's 30-second grid.
         duration_s = {"ces": 1470, "daisy": 1500, "pong": 2280}[case]
         with solar_system_ephemeris.set("builtin"):
-            report = generate_trajectory(case, tmp_path, duration_s=duration_s)
+            report = generate_trajectory(
+                quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+                tmp_path, start=quickstart.DEFAULT_START[case], duration_s=duration_s,
+            )
             assert report["status"] == "complete"
             source = tmp_path / "fyst_trajectory.ecsv"
             samples = QTable.read(source)

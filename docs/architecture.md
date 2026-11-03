@@ -24,11 +24,20 @@ Callers configure these before numerical imports and coordinate transformations.
 The generator supports CES, Daisy, and Pong. It calls the native FYST scheduler
 with default overhead settings, then reconstructs science trajectories from the
 written schedule. It preserves scan/subscan IDs, samples, and block boundaries.
-The default window is 10800 seconds, including overhead. A window without science
+`generate_trajectory(patch, output_dir, *, start, duration_s, sample_rate_hz=None,
+iers_file=None, overwrite=False)` requires a FYST `ObservingPatch`, an Astropy
+`Time` or UTC ISO start, and a scheduling duration including overhead. The
+quick-start script owns the example patches, reference starts, 10800-second window
+and 10 Hz default; the library has no example inputs. A window without science
 produces only the full timeline and a report; the CLI exits unsuccessfully.
-`generate_trajectory(sample_rate_hz=10.0)` / `--sample-rate HZ` sets the requested
-FYST scan timestep to `1 / sample_rate_hz` for all three cases. The rate must be
-finite and positive; the report records `requested_sample_rate_hz`.
+An optional finite, positive `sample_rate_hz` overrides the timestep on a copy of
+the patch. Otherwise its `scan_params["timestep"]` is preserved, or FYST supplies
+the default when unset. The CLI retains `--sample-rate HZ`.
+The report records `patch_name`, `scan_type` and `requested_sample_rate_hz`
+(the reciprocal of the requested timestep, or null when unspecified).
+The `case` label remains `ces`, `daisy` or `pong`, derived from `scan_type`
+(`constant_el` maps to `ces`), preserving downstream H5 names. Other scan types
+raise `ValueError`; non-patch inputs raise `TypeError`.
 
 | ECSV columns | Units and meaning |
 |---|---|

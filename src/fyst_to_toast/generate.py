@@ -14,14 +14,7 @@ from pathlib import Path
 
 from fyst_to_toast import trajectory_h5 as schema
 
-DEFAULT_DURATION_S = 10800
-DEFAULT_SAMPLE_RATE_HZ = 10.0
-DEFAULT_START = {
-    "ces": "2026-08-02T01:25:00",
-    "daisy": "2026-03-15T04:00:00",
-    # FYST docs/trajectory_examples.rst:143 (f095c51).
-    "pong": "2026-03-15T01:00:00",
-}
+SCAN_TYPE_LABELS = {"constant_el": "ces", "daisy": "daisy", "pong": "pong"}
 OUTPUT_NAMES = (
     "full_timeline.ecsv",
     "schedule.ecsv",
@@ -33,59 +26,6 @@ OUTPUT_NAMES = (
 def sha256(path):
     """Return a file's byte hash for provenance."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
-def build_legacy_patch(case, sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ):
-    """Build legacy CES / Daisy or FYST's documented Pong as an ObservingPatch."""
-    from fyst_trajectories.overhead import ObservingPatch
-
-    if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
-        raise ValueError("sample_rate_hz must be finite and positive")
-    timestep = 1.0 / sample_rate_hz
-    if case not in DEFAULT_START:
-        raise ValueError(f"Unknown case: {case}")
-    if case == "ces":
-        patch = ObservingPatch(
-            name="native CES",
-            ra_center=330,
-            dec_center=-50,
-            width=30,
-            height=8,
-            scan_type="constant_el",
-            velocity=1,
-            elevation=50,
-            scan_params={"timestep": timestep, "az_accel": 1.0},
-        )
-    elif case == "daisy":
-        patch = ObservingPatch(
-            name="native Daisy",
-            ra_center=180,
-            dec_center=-30,
-            width=2,
-            height=2,
-            scan_type="daisy",
-            velocity=0.3,
-            scan_params={"radius": 1, "turn_radius": 0.3, "timestep": timestep},
-        )
-    else:
-        # Field and pattern: FYST docs/trajectory_examples.rst:145-160 (f095c51).
-        # Native period is 240 s, within the default 3600 - 300 s subscan budget.
-        patch = ObservingPatch(
-            name="native Pong",
-            ra_center=180,
-            dec_center=-30,
-            width=2,
-            height=2,
-            scan_type="pong",
-            velocity=0.4,
-            scan_params={
-                "spacing": 0.1,
-                "num_terms": 4,
-                "angle": 0.0,
-                "timestep": timestep,
-            },
-        )
-    return patch
 
 
 def generate_observing_timeline(patch, start, duration_s):
@@ -149,7 +89,7 @@ def toast_boresight_roll_deg(el_deg, site):
     )
 
 
-def build_trajectory_table(case, science_timeline, pairs, source):
+def build_trajectory_table(label, science_timeline, pairs, source):
     """Keep native arrays, units and half-open block slices; do not resample."""
     import numpy as np
     from astropy import units as u
@@ -206,7 +146,7 @@ def build_trajectory_table(case, science_timeline, pairs, source):
                     np.median(np.diff(trajectory.times))
                 ),
                 schema.ECSV_REQUESTED_TIMESTEP_S: float(
-                    block.metadata.get("scan_params", {}).get("timestep", 0.1)
+                    planned.config.timestep
                 ),
             }
         )
@@ -215,7 +155,7 @@ def build_trajectory_table(case, science_timeline, pairs, source):
     if not np.all(np.diff(samples[schema.ECSV_TIMESTAMP_UNIX_S].value) > 0):
         raise RuntimeError("Native timestamps must be strictly increasing")
     samples.meta = {
-        schema.ECSV_CASE: case,
+        schema.ECSV_CASE: label,
         schema.ECSV_COORDINATE_FRAME: "mount AltAz",
         schema.ECSV_START_UTC: origin.utc.isot,
         schema.ECSV_GENERATOR: "fyst_trajectories.overhead.schedule_to_trajectories",
@@ -230,7 +170,7 @@ def build_trajectory_table(case, science_timeline, pairs, source):
 
 
 def _initial_report(
-    case, timeline, start, duration_s, iers_path, sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ
+    patch, label, timeline, start, duration_s, iers_path
 ):
     from astropy.utils import iers
 
@@ -238,8 +178,11 @@ def _initial_report(
     from fyst_trajectories.overhead import io as overhead_io
 
     science = timeline.science_blocks
+    timestep = patch.scan_params.get("timestep")
     report = {
-        "case": case,
+        "case": label,
+        "patch_name": patch.name,
+        "scan_type": patch.scan_type,
         "status": "scheduled",
         "fyst": {
             "__version__": fyst_trajectories.__version__,
@@ -251,7 +194,7 @@ def _initial_report(
         "window_start_utc": start.utc.isot,
         "window_stop_utc": timeline.end_time.utc.isot,
         "window_s": float(duration_s),
-        "requested_sample_rate_hz": float(sample_rate_hz),
+        "requested_sample_rate_hz": 1.0 / float(timestep) if timestep is not None else None,
         "scheduler_time_step_s": 30,
         "iers_file": str(iers_path) if iers_path else None,
         "iers_sha256": sha256(iers_path) if iers_path else None,
@@ -276,27 +219,44 @@ def _initial_report(
 
 
 def generate_trajectory(
-    case,
+    patch,
     output_dir,
     *,
-    start=None,
-    duration_s=DEFAULT_DURATION_S,
-    sample_rate_hz=DEFAULT_SAMPLE_RATE_HZ,
+    start,
+    duration_s,
+    sample_rate_hz=None,
     iers_file=None,
     overwrite=False,
 ):
-    """Write the four generation artifacts and return their report.
+    """Generate artifacts from a FYST ObservingPatch and return their report.
+
+    ``start`` is an Astropy Time or UTC ISO string; ``duration_s`` is the
+    scheduling window including overhead. Both must be supplied by the caller.
 
     IERS / ephemeris configuration belongs to the caller. ``iers_file`` records
     the caller's selected table and hash; it does not install that table.
     With no science, only the full timeline and a no_science report are written.
-    ``sample_rate_hz`` sets the requested FYST timestep to its reciprocal.
+    ``sample_rate_hz`` overrides the timestep on a copy, leaving ``patch``
+    unchanged. If omitted, use the patch timestep or FYST's default.
     """
     import numpy as np
     from astropy.time import Time
 
-    patch = build_legacy_patch(case, sample_rate_hz=sample_rate_hz)
-    start = Time(start or DEFAULT_START[case], scale="utc", precision=3)
+    from fyst_trajectories.overhead import ObservingPatch
+
+    if not isinstance(patch, ObservingPatch):
+        raise TypeError("patch must be a fyst_trajectories.overhead.ObservingPatch")
+    try:
+        label = SCAN_TYPE_LABELS[patch.scan_type]
+    except KeyError:
+        raise ValueError(f"Unknown scan_type: {patch.scan_type}") from None
+    if sample_rate_hz is not None:
+        if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
+            raise ValueError("sample_rate_hz must be finite and positive")
+        patch = replace(
+            patch, scan_params={**dict(patch.scan_params), "timestep": 1.0 / sample_rate_hz}
+        )
+    start = Time(start, scale="utc", precision=3)
     folder = Path(output_dir).expanduser().resolve()
     outputs = [folder / name for name in OUTPUT_NAMES]
     if not overwrite and any(path.exists() for path in outputs):
@@ -309,7 +269,7 @@ def generate_trajectory(
             raise ValueError("Outputs must not overwrite the input IERS file")
 
     timeline = generate_observing_timeline(patch, start, duration_s)
-    report = _initial_report(case, timeline, start, duration_s, iers_path, sample_rate_hz)
+    report = _initial_report(patch, label, timeline, start, duration_s, iers_path)
     if overwrite:
         # A no-science run must not leave a stale trajectory; never touch H5.
         for path in outputs:
@@ -325,7 +285,7 @@ def generate_trajectory(
 
     science_timeline, pairs = reconstruct_trajectories(source, timeline.science_blocks)
     samples = build_trajectory_table(
-        case, science_timeline, pairs, source
+        label, science_timeline, pairs, source
     )
     samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
     for summary, block in zip(

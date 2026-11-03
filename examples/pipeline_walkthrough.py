@@ -14,6 +14,7 @@ os.environ["MPLBACKEND"] = "Agg"
 
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -23,6 +24,11 @@ import sys
 import time
 
 REPO = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location(
+    "generate_trajectory_example", REPO / "scripts/generate_trajectory.py"
+)
+quickstart = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(quickstart)
 DEFAULT_DURATION_S = 6000.0
 
 
@@ -363,9 +369,11 @@ def run(args):
 
     step(1, "Native FYST (called by this repository)", f"case={args.case} → {generation}/schedule.ecsv", "Scheduling, overhead, science blocks")
     print("generate_trajectory performs Steps 1 and 2 together; inspect each file below without regenerating trajectories.")
-    generated = generate_trajectory(args.case, generation, duration_s=args.duration_s,
-                                    sample_rate_hz=args.sample_rate,
-                                    iers_file=iers.IERS_A_FILE, overwrite=args.overwrite)
+    patch = quickstart.example_patch(args.case, args.sample_rate)
+    generated = generate_trajectory(
+        patch, generation, start=quickstart.DEFAULT_START[args.case],
+        duration_s=args.duration_s, iers_file=iers.IERS_A_FILE, overwrite=args.overwrite,
+    )
     if generated["status"] != "complete":
         raise RuntimeError(f"No science in this window; inspect {generation}/full_timeline.ecsv and increase --duration-s.")
     schedule = QTable.read(generation / "schedule.ecsv")

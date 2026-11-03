@@ -8,7 +8,6 @@ for key in ("MPI_DISABLE", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
 import hashlib
 import json
 from pathlib import Path
-import runpy
 import shutil
 import sys
 
@@ -37,14 +36,18 @@ def offline_geometry():
 
 
 @pytest.fixture(scope="module", params=[("ces", 1470), ("daisy", 1500), ("pong", 2280)])
-def generated20(request, tmp_path_factory):
+def generated20(request, tmp_path_factory, quickstart):
     pytest.importorskip("fyst_trajectories", exc_type=ImportError)
     from fyst_to_toast.generate import generate_trajectory
 
     case, duration = request.param
     folder = tmp_path_factory.mktemp(f"rate20_{case}")
     with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
-        report = generate_trajectory(case, folder, duration_s=duration, sample_rate_hz=20.0)
+        report = generate_trajectory(
+            quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+            folder, start=quickstart.DEFAULT_START[case],
+            duration_s=duration, sample_rate_hz=20.0,
+        )
         assert report["status"] == "complete"
         assert report["requested_sample_rate_hz"] == 20.0
         source = folder / "fyst_trajectory.ecsv"
@@ -167,12 +170,12 @@ def test_invalid_stored_rate_keeps_valueerror(tmp_path, value):
 
 
 @pytest.mark.parametrize("rate", ["0", "-10", "nan", "inf", "-inf", "bad"])
-def test_invalid_sample_rate_cli(tmp_path, monkeypatch, capsys, rate):
+def test_invalid_sample_rate_cli(tmp_path, monkeypatch, capsys, rate, quickstart):
     output = tmp_path / "generated"
     monkeypatch.setattr(sys, "argv", ["generate_trajectory.py", "ces", f"--sample-rate={rate}",
                                     "--output-dir", str(output)])
     with pytest.raises(SystemExit) as error:
-        runpy.run_path(str(ROOT / "scripts/generate_trajectory.py"), run_name="__main__")
+        quickstart.main()
     assert error.value.code == 2
     assert "--sample-rate" in capsys.readouterr().err
     assert not output.exists()

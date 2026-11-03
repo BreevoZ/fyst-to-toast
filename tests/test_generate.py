@@ -30,16 +30,20 @@ from fyst_to_toast.generate import build_trajectory_table, generate_trajectory
 
 
 @pytest.mark.parametrize("rate", [0, -1, np.nan, np.inf, -np.inf])
-def test_invalid_requested_sample_rate(tmp_path, rate):
+def test_invalid_requested_sample_rate(tmp_path, rate, quickstart):
     folder = tmp_path / "generation"
+    patch = quickstart.example_patch("ces", quickstart.DEFAULT_SAMPLE_RATE_HZ)
     with pytest.raises(ValueError, match="sample_rate_hz must be finite and positive"):
-        generate_trajectory("ces", folder, sample_rate_hz=rate)
+        generate_trajectory(
+            patch, folder, start=quickstart.DEFAULT_START["ces"], duration_s=1800,
+            sample_rate_hz=rate,
+        )
     assert not folder.exists()
 
 
 # Pong's documented night includes an initial planet calibration before science.
 @pytest.mark.parametrize("case,duration_s", [("ces", 1800), ("pong", 2400)])
-def test_ecsv_writer_contract(tmp_path, case, duration_s):
+def test_ecsv_writer_contract(tmp_path, case, duration_s, quickstart):
     iers_path = os.environ.get("FYST_TO_TOAST_TEST_IERS")
     with iers.conf.set_temp("auto_download", False):
         table = iers.IERS_A.open(iers_path) if iers_path else iers.IERS_Auto.open()
@@ -48,7 +52,9 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s):
             solar_system_ephemeris.set("builtin"),
         ):
             report = generate_trajectory(
-                case, tmp_path, duration_s=duration_s, iers_file=iers_path
+                quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+                tmp_path, start=quickstart.DEFAULT_START[case],
+                duration_s=duration_s, iers_file=iers_path,
             )
             assert report["status"] == "complete"
             source = tmp_path / "fyst_trajectory.ecsv"
@@ -114,7 +120,9 @@ def test_build_nasmyth_roll(tmp_path, port, sign):
     source = tmp_path / "schedule.ecsv"
     source.write_text("synthetic schedule hash input\n")
     samples = build_trajectory_table(
-        "test", timeline, [(block, SimpleNamespace(trajectory=trajectory))],
+        "test", timeline, [(block, SimpleNamespace(
+            trajectory=trajectory, config=SimpleNamespace(timestep=0.1)
+        ))],
         source,
     )
     roll = samples[schema.ECSV_BORESIGHT_ROLL_DEG]
@@ -124,7 +132,7 @@ def test_build_nasmyth_roll(tmp_path, port, sign):
 
 
 @pytest.mark.parametrize("auto_download", [False, True])
-def test_report_records_actual_iers_configuration(auto_download):
+def test_report_records_actual_iers_configuration(auto_download, quickstart):
     from fyst_trajectories.overhead import OverheadModel
     from fyst_to_toast.generate import _initial_report
 
@@ -134,6 +142,83 @@ def test_report_records_actual_iers_configuration(auto_download):
     )
     # Only report construction runs: enabling the setting never triggers a download.
     with iers.conf.set_temp("auto_download", auto_download):
-        report = _initial_report("ces", timeline, start, 1.0, None)
+        patch = quickstart.example_patch("ces", quickstart.DEFAULT_SAMPLE_RATE_HZ)
+        report = _initial_report(patch, "ces", timeline, start, 1.0, None)
         assert report["iers_auto_download"] is auto_download
         assert iers.conf.auto_download is auto_download
+
+
+@pytest.mark.parametrize("timestep", [None, 0.2])
+@pytest.mark.parametrize("rate", [None, 20.0])
+def test_custom_patch_and_sampling_override(tmp_path, timestep, rate):
+    """A caller-defined field keeps its identity and immutable sampling inputs."""
+    from fyst_trajectories.overhead import ObservingPatch, read_timeline, schedule_to_trajectories
+
+    params = {"spacing": 0.1, "num_terms": 4}
+    if timestep is not None:
+        params["timestep"] = timestep
+    params["angle"] = 15.0  # Keep a key after timestep to check override ordering.
+    patch = ObservingPatch(
+        name="custom small Pong", ra_center=185, dec_center=-35,
+        width=1.2, height=1.0, scan_type="pong", velocity=0.3,
+        scan_params=params,
+    )
+    original = replace(patch)
+    original_params = patch.scan_params
+    with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
+        report = generate_trajectory(
+            patch, tmp_path, start=Time("2026-03-15T04:00:00", scale="utc"),
+            duration_s=1800, sample_rate_hz=rate,
+        )
+        assert report["status"] == "complete"
+        timeline = read_timeline(tmp_path / "schedule.ecsv")
+        pairs = schedule_to_trajectories(timeline)
+    assert report["case"] == "pong"
+    assert report["patch_name"] == patch.name
+    assert report["scan_type"] == patch.scan_type
+    expected_timestep = 1.0 / rate if rate is not None else timestep
+    assert report["requested_sample_rate_hz"] == (
+        None if expected_timestep is None else 1.0 / expected_timestep
+    )
+    samples = QTable.read(tmp_path / "fyst_trajectory.ecsv")
+    assert samples.meta[schema.ECSV_CASE] == "pong"
+    assert len(samples) == report["total_science_samples"] > 0
+    expected_params = dict(params)
+    if rate is not None:
+        expected_params["timestep"] = 1.0 / rate
+    for (block, planned), metadata in zip(pairs, samples.meta[schema.ECSV_BLOCKS], strict=True):
+        # FYST appends its solved cycle count to the caller's ordered parameters.
+        saved_params = dict(block.metadata["scan_params"])
+        assert saved_params.pop("n_cycles") > 0
+        assert list(saved_params.items()) == list(expected_params.items())
+        assert metadata[schema.ECSV_REQUESTED_TIMESTEP_S] == planned.config.timestep
+        if expected_timestep is not None:
+            assert planned.config.timestep == expected_timestep
+        np.testing.assert_allclose(np.diff(planned.trajectory.times), planned.config.timestep)
+    assert patch == original
+    assert patch.scan_params is original_params
+    assert list(patch.scan_params.items()) == list(params.items())
+    with pytest.raises(TypeError):
+        patch.scan_params["timestep"] = 99
+
+
+@pytest.mark.parametrize("value", ["pong", None, {}])
+def test_generate_rejects_non_patch(tmp_path, value, quickstart):
+    folder = tmp_path / "generation"
+    with pytest.raises(TypeError, match="ObservingPatch"):
+        generate_trajectory(
+            value, folder, start=quickstart.DEFAULT_START["pong"], duration_s=1800,
+        )
+    assert not folder.exists()
+
+
+def test_generate_rejects_unknown_scan_type(tmp_path, quickstart):
+    patch = quickstart.example_patch("pong", quickstart.DEFAULT_SAMPLE_RATE_HZ)
+    # Emulate a future FYST pattern beyond the adapter's supported labels.
+    object.__setattr__(patch, "scan_type", "future_pattern")
+    folder = tmp_path / "generation"
+    with pytest.raises(ValueError, match="Unknown scan_type: future_pattern"):
+        generate_trajectory(
+            patch, folder, start=quickstart.DEFAULT_START["pong"], duration_s=1800,
+        )
+    assert not folder.exists()

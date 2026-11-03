@@ -49,6 +49,30 @@ python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"  # writes $
 Both scripts use Astropy's bundled IERS data and never download; pass `--iers-file`
 for another offline table.
 
+### Use your own patch
+
+Build an `ObservingPatch` in your own script and pass it to the library; no `src/`
+edits are needed. Supply a UTC start and scheduling duration explicitly.
+
+```python
+from astropy.coordinates import solar_system_ephemeris
+from astropy.utils import iers
+from fyst_trajectories.overhead import ObservingPatch
+from fyst_to_toast.generate import generate_trajectory
+
+iers.conf.auto_download = False
+patch = ObservingPatch(name="my Pong", ra_center=185, dec_center=-35,
+                      width=1.2, height=1.0, scan_type="pong", velocity=0.3)
+with solar_system_ephemeris.set("builtin"):
+    report = generate_trajectory(patch, "output/my_patch", start="2026-03-15T04:00:00",
+                                 duration_s=1800, sample_rate_hz=10)
+```
+
+Omit `sample_rate_hz` to use the patch's `scan_params["timestep"]` or FYST's default
+when unset. An override leaves the original patch unchanged.
+
+### Load the generated observations
+
 ```python
 import os
 from pathlib import Path

@@ -909,13 +909,16 @@ def test_multi_build_failure_rolls_back(multi_telescope, data, monkeypatch, fail
         assert len(obs.detdata) == len(obs.intervals) == 0
 
 
-def test_generated_schedule_multiple_blocks(data, tmp_path):
+def test_generated_schedule_multiple_blocks(data, tmp_path, quickstart):
     pytest.importorskip("fyst_trajectories", exc_type=ImportError)
     from astropy.table import QTable
     from fyst_to_toast.generate import generate_trajectory
 
     with solar_system_ephemeris.set("builtin"):
-        report = generate_trajectory("daisy", tmp_path, duration_s=5400)
+        report = generate_trajectory(
+            quickstart.example_patch("daisy", quickstart.DEFAULT_SAMPLE_RATE_HZ),
+            tmp_path, start=quickstart.DEFAULT_START["daisy"], duration_s=5400,
+        )
         assert report["status"] == "complete"
         source = tmp_path / "fyst_trajectory.ecsv"
         samples = QTable.read(source)
