@@ -25,7 +25,7 @@ import time
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
-    "generate_trajectory_example", REPO / "scripts/generate_trajectory.py"
+    "patch_to_ecsv", REPO / "scripts/patch_to_ecsv.py"
 )
 quickstart = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(quickstart)

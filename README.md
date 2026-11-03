@@ -42,7 +42,7 @@ From the repository root:
 
 ```bash
 export RUN_DIR=output/quickstart
-python scripts/generate_trajectory.py ces --output-dir "$RUN_DIR"     # or daisy, pong
+python scripts/patch_to_ecsv.py ces --output-dir "$RUN_DIR"     # or daisy, pong
 python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"  # writes $RUN_DIR/hdf5/
 ```
 

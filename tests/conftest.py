@@ -8,8 +8,8 @@ import pytest
 
 @pytest.fixture(scope="session")
 def quickstart():
-    path = Path(__file__).resolve().parents[1] / "scripts/generate_trajectory.py"
-    spec = importlib.util.spec_from_file_location("generate_trajectory_example", path)
+    path = Path(__file__).resolve().parents[1] / "scripts/patch_to_ecsv.py"
+    spec = importlib.util.spec_from_file_location("patch_to_ecsv", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

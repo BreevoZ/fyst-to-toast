@@ -172,7 +172,7 @@ def test_invalid_stored_rate_keeps_valueerror(tmp_path, value):
 @pytest.mark.parametrize("rate", ["0", "-10", "nan", "inf", "-inf", "bad"])
 def test_invalid_sample_rate_cli(tmp_path, monkeypatch, capsys, rate, quickstart):
     output = tmp_path / "generated"
-    monkeypatch.setattr(sys, "argv", ["generate_trajectory.py", "ces", f"--sample-rate={rate}",
+    monkeypatch.setattr(sys, "argv", ["patch_to_ecsv.py", "ces", f"--sample-rate={rate}",
                                     "--output-dir", str(output)])
     with pytest.raises(SystemExit) as error:
         quickstart.main()

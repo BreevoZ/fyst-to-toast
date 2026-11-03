@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Used by fyst_to_toast.generate / scripts/generate_trajectory.py and optional FYST tests.
+# Used by fyst_to_toast.generate / scripts/patch_to_ecsv.py and optional FYST tests.
 # 0.12 marks schedule boresight_angle as the TOAST roll with a convention header.
 fyst = ["fyst-trajectories>=0.12"]
 
