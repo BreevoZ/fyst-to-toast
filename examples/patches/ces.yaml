@@ -1,0 +1,12 @@
+# Copy this CES template and edit the field and scan parameters for your observation.
+name: native CES
+ra_center: 330
+dec_center: -50
+width: 30
+height: 8
+scan_type: constant_el
+velocity: 1
+elevation: 50
+scan_params:
+  timestep: 0.1
+  az_accel: 1.0

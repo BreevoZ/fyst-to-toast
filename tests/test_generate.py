@@ -32,7 +32,7 @@ from fyst_to_toast.generate import build_trajectory_table, generate_trajectory
 @pytest.mark.parametrize("rate", [0, -1, np.nan, np.inf, -np.inf])
 def test_invalid_requested_sample_rate(tmp_path, rate, quickstart):
     folder = tmp_path / "generation"
-    patch = quickstart.example_patch("ces", quickstart.DEFAULT_SAMPLE_RATE_HZ)
+    patch = quickstart.example_patch("ces")
     with pytest.raises(ValueError, match="sample_rate_hz must be finite and positive"):
         generate_trajectory(
             patch, folder, start=quickstart.DEFAULT_START["ces"], duration_s=1800,
@@ -52,7 +52,7 @@ def test_ecsv_writer_contract(tmp_path, case, duration_s, quickstart):
             solar_system_ephemeris.set("builtin"),
         ):
             report = generate_trajectory(
-                quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+                quickstart.example_patch(case),
                 tmp_path, start=quickstart.DEFAULT_START[case],
                 duration_s=duration_s, iers_file=iers_path,
             )
@@ -142,7 +142,7 @@ def test_report_records_actual_iers_configuration(auto_download, quickstart):
     )
     # Only report construction runs: enabling the setting never triggers a download.
     with iers.conf.set_temp("auto_download", auto_download):
-        patch = quickstart.example_patch("ces", quickstart.DEFAULT_SAMPLE_RATE_HZ)
+        patch = quickstart.example_patch("ces")
         report = _initial_report(patch, "ces", timeline, start, 1.0, None)
         assert report["iers_auto_download"] is auto_download
         assert iers.conf.auto_download is auto_download
@@ -213,7 +213,7 @@ def test_generate_rejects_non_patch(tmp_path, value, quickstart):
 
 
 def test_generate_rejects_unknown_scan_type(tmp_path, quickstart):
-    patch = quickstart.example_patch("pong", quickstart.DEFAULT_SAMPLE_RATE_HZ)
+    patch = quickstart.example_patch("pong")
     # Emulate a future FYST pattern beyond the adapter's supported labels.
     object.__setattr__(patch, "scan_type", "future_pattern")
     folder = tmp_path / "generation"

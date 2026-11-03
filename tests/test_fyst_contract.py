@@ -57,7 +57,7 @@ def test_writer_schedule_contract(case, tmp_path, quickstart):
     )
 
     start = Time(quickstart.DEFAULT_START[case], scale="utc", precision=3)
-    patch = quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ)
+    patch = quickstart.example_patch(case)
     timeline = generate_observing_timeline(patch, start, 1800)
     write_timeline_ecsv(timeline, tmp_path)
     schedule = tmp_path / "full_timeline.ecsv"

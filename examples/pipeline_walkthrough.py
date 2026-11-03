@@ -369,10 +369,11 @@ def run(args):
 
     step(1, "Native FYST (called by this repository)", f"case={args.case} → {generation}/schedule.ecsv", "Scheduling, overhead, science blocks")
     print("generate_trajectory performs Steps 1 and 2 together; inspect each file below without regenerating trajectories.")
-    patch = quickstart.example_patch(args.case, args.sample_rate)
+    patch = quickstart.example_patch(args.case)
     generated = generate_trajectory(
         patch, generation, start=quickstart.DEFAULT_START[args.case],
-        duration_s=args.duration_s, iers_file=iers.IERS_A_FILE, overwrite=args.overwrite,
+        duration_s=args.duration_s, sample_rate_hz=args.sample_rate,
+        iers_file=iers.IERS_A_FILE, overwrite=args.overwrite,
     )
     if generated["status"] != "complete":
         raise RuntimeError(f"No science in this window; inspect {generation}/full_timeline.ecsv and increase --duration-s.")

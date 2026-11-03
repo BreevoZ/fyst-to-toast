@@ -1,4 +1,4 @@
-"""Shared access to the quick-start script's example inputs."""
+"""Shared access to the quick-start script and its YAML template loader."""
 
 import importlib.util
 from pathlib import Path

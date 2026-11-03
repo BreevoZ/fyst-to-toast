@@ -916,7 +916,7 @@ def test_generated_schedule_multiple_blocks(data, tmp_path, quickstart):
 
     with solar_system_ephemeris.set("builtin"):
         report = generate_trajectory(
-            quickstart.example_patch("daisy", quickstart.DEFAULT_SAMPLE_RATE_HZ),
+            quickstart.example_patch("daisy"),
             tmp_path, start=quickstart.DEFAULT_START["daisy"], duration_s=5400,
         )
         assert report["status"] == "complete"

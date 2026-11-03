@@ -44,7 +44,7 @@ def generated20(request, tmp_path_factory, quickstart):
     folder = tmp_path_factory.mktemp(f"rate20_{case}")
     with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
         report = generate_trajectory(
-            quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+            quickstart.example_patch(case),
             folder, start=quickstart.DEFAULT_START[case],
             duration_s=duration, sample_rate_hz=20.0,
         )

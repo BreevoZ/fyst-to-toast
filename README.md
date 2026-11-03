@@ -51,21 +51,35 @@ for another offline table.
 
 ### Use your own patch
 
-Build an `ObservingPatch` in your own script and pass it to the library; no `src/`
-edits are needed. Supply a UTC start and scheduling duration explicitly.
+Copy a [YAML template](examples/patches/), edit the field and scan parameters,
+then supply its UTC start:
+
+```bash
+cp examples/patches/pong.yaml my_patch.yaml
+# Edit my_patch.yaml for your observation.
+python scripts/patch_to_ecsv.py --patch-file my_patch.yaml --start 2026-03-15T01:00:00
+```
+
+YAML keys are `ObservingPatch` constructor arguments. Use either a case shortcut
+(`ces`, `daisy`, `pong`) or `--patch-file`; custom files require `--start`.
+Output defaults to `output/generated/<case or YAML stem>/`, with a 10800-second
+scheduling window. Set `--duration-s` to change it. Sampling uses the YAML
+`scan_params.timestep` (0.1 s in the templates), or FYST's default when unset;
+`--sample-rate HZ` overrides it without editing the file.
+
+Alternatively, build an `ObservingPatch` and call the Python API directly:
 
 ```python
 from astropy.coordinates import solar_system_ephemeris
 from astropy.utils import iers
 from fyst_trajectories.overhead import ObservingPatch
 from fyst_to_toast.generate import generate_trajectory
-
 iers.conf.auto_download = False
 patch = ObservingPatch(name="my Pong", ra_center=185, dec_center=-35,
                       width=1.2, height=1.0, scan_type="pong", velocity=0.3)
 with solar_system_ephemeris.set("builtin"):
     report = generate_trajectory(patch, "output/my_patch", start="2026-03-15T04:00:00",
-                                 duration_s=1800, sample_rate_hz=10)
+                                 duration_s=1800)
 ```
 
 Omit `sample_rate_hz` to use the patch's `scan_params["timestep"]` or FYST's default
@@ -108,7 +122,7 @@ finally:
     data.clear()
 ```
 
-Set `--sample-rate HZ` when generating (default 10); `telescope.focalplane.sample_rate` must match both the stored H5 rate and its timestamps within `rtol=1e-6`.
+Set `--sample-rate HZ` to override the patch's sampling (templates use 10 Hz); `telescope.focalplane.sample_rate` must match both the stored H5 rate and its timestamps within `rtol=1e-6`.
 Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGround does.
 
 ## What each Observation contains

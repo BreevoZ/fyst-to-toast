@@ -1,0 +1,12 @@
+# Copy this Daisy template and edit the field and scan parameters for your observation.
+name: native Daisy
+ra_center: 180
+dec_center: -30
+width: 2
+height: 2
+scan_type: daisy
+velocity: 0.3
+scan_params:
+  radius: 1
+  turn_radius: 0.3
+  timestep: 0.1

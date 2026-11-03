@@ -27,12 +27,18 @@ written schedule. It preserves scan/subscan IDs, samples, and block boundaries.
 `generate_trajectory(patch, output_dir, *, start, duration_s, sample_rate_hz=None,
 iers_file=None, overwrite=False)` requires a FYST `ObservingPatch`, an Astropy
 `Time` or UTC ISO start, and a scheduling duration including overhead. The
-quick-start script owns the example patches, reference starts, 10800-second window
-and 10 Hz default; the library has no example inputs. A window without science
+quick-start script loads `ObservingPatch` arguments with `yaml.safe_load` from
+`examples/patches/{ces,daisy,pong}.yaml` or a caller's `--patch-file PATH`.
+Exactly one case shortcut or patch file is required; patch files also require
+`--start`. The script owns the case reference starts and 10800-second window;
+the YAML templates own the scan parameters, including their 0.1-second timestep.
+Invalid YAML or rejected constructor arguments produce a CLI error naming the file.
+The library has no example inputs. A window without science
 produces only the full timeline and a report; the CLI exits unsuccessfully.
 An optional finite, positive `sample_rate_hz` overrides the timestep on a copy of
 the patch. Otherwise its `scan_params["timestep"]` is preserved, or FYST supplies
-the default when unset. The CLI retains `--sample-rate HZ`.
+the default when unset. The CLI's `--sample-rate HZ` defaults to no override and
+passes an explicit rate to the library without changing the YAML file.
 The report records `patch_name`, `scan_type` and `requested_sample_rate_hz`
 (the reciprocal of the requested timestep, or null when unspecified).
 The `case` label remains `ces`, `daisy` or `pong`, derived from `scan_type`

@@ -46,7 +46,7 @@ def test_every_observation_intervals_and_metadata(case, data, tmp_path, quicksta
         duration_s = {"ces": 1470, "daisy": 1500, "pong": 2280}[case]
         with solar_system_ephemeris.set("builtin"):
             report = generate_trajectory(
-                quickstart.example_patch(case, quickstart.DEFAULT_SAMPLE_RATE_HZ),
+                quickstart.example_patch(case),
                 tmp_path, start=quickstart.DEFAULT_START[case], duration_s=duration_s,
             )
             assert report["status"] == "complete"
