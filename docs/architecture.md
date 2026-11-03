@@ -41,6 +41,10 @@ the default when unset. The CLI's `--sample-rate HZ` defaults to no override and
 passes an explicit rate to the library without changing the YAML file.
 The report records `patch_name`, `scan_type` and `requested_sample_rate_hz`
 (the reciprocal of the requested timestep, or null when unspecified).
+`fyst_warnings` lists FYST warnings that pass the caller's warning filters,
+including in a `no_science` report. Entries contain `category`, `message` and
+`count`, merging identical category/message pairs in first-seen order; none gives
+`[]`. Warnings still use the caller's display handler, and error filters still raise.
 The `case` label remains `ces`, `daisy` or `pong`, derived from `scan_type`
 (`constant_el` maps to `ces`), preserving downstream H5 names. Other scan types
 raise `ValueError`; non-patch inputs raise `TypeError`.

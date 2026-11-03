@@ -8,7 +8,9 @@ MPI / thread settings; importing the package never configures the process.
 import hashlib
 import json
 import math
+import warnings
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -26,6 +28,29 @@ OUTPUT_NAMES = (
 def sha256(path):
     """Return a file's byte hash for provenance."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+@contextmanager
+def _capture_fyst_warnings():
+    """Record warnings that pass caller filters, forwarding their normal display."""
+    records, entries = [], {}
+    original_showwarning = warnings.showwarning
+
+    def showwarning(message, category, filename, lineno, file=None, line=None):
+        if category.__module__.split(".", 1)[0] == "fyst_trajectories":
+            key = (category.__name__, str(message))
+            if key not in entries:
+                entry = {"category": key[0], "message": key[1], "count": 0}
+                entries[key] = entry
+                records.append(entry)
+            entries[key]["count"] += 1
+        original_showwarning(message, category, filename, lineno, file, line)
+
+    warnings.showwarning = showwarning
+    try:
+        yield records
+    finally:
+        warnings.showwarning = original_showwarning
 
 
 def generate_observing_timeline(patch, start, duration_s):
@@ -268,35 +293,37 @@ def generate_trajectory(
         if iers_path in outputs:
             raise ValueError("Outputs must not overwrite the input IERS file")
 
-    timeline = generate_observing_timeline(patch, start, duration_s)
-    report = _initial_report(patch, label, timeline, start, duration_s, iers_path)
-    if overwrite:
-        # A no-science run must not leave a stale trajectory; never touch H5.
-        for path in outputs:
-            path.unlink(missing_ok=True)
-    source = write_timeline_ecsv(timeline, folder)
-    report_path = folder / "report.json"
-    if source is None:
-        report["status"] = "no_science"
+    with _capture_fyst_warnings() as fyst_warnings:
+        timeline = generate_observing_timeline(patch, start, duration_s)
+        report = _initial_report(patch, label, timeline, start, duration_s, iers_path)
+        report["fyst_warnings"] = fyst_warnings
+        if overwrite:
+            # A no-science run must not leave a stale trajectory; never touch H5.
+            for path in outputs:
+                path.unlink(missing_ok=True)
+        source = write_timeline_ecsv(timeline, folder)
+        report_path = folder / "report.json"
+        if source is None:
+            report["status"] = "no_science"
+            report_path.write_text(json.dumps(report, indent=2) + "\n")
+            return report
+        report["source_schedule_sha256"] = sha256(source)
+        report_path.write_text(json.dumps(report, indent=2) + "\n")
+
+        science_timeline, pairs = reconstruct_trajectories(source, timeline.science_blocks)
+        samples = build_trajectory_table(
+            label, science_timeline, pairs, source
+        )
+        samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
+        for summary, block in zip(
+            report["science_blocks"], samples.meta[schema.ECSV_BLOCKS], strict=True
+        ):
+            summary.update(block)
+        values, counts = np.unique(samples[schema.ECSV_SCAN_FLAG], return_counts=True)
+        report["flag_value_counts"] = {
+            str(int(value)): int(count) for value, count in zip(values, counts, strict=True)
+        }
+        report["total_science_samples"] = len(samples)
+        report["status"] = "complete"
         report_path.write_text(json.dumps(report, indent=2) + "\n")
         return report
-    report["source_schedule_sha256"] = sha256(source)
-    report_path.write_text(json.dumps(report, indent=2) + "\n")
-
-    science_timeline, pairs = reconstruct_trajectories(source, timeline.science_blocks)
-    samples = build_trajectory_table(
-        label, science_timeline, pairs, source
-    )
-    samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
-    for summary, block in zip(
-        report["science_blocks"], samples.meta[schema.ECSV_BLOCKS], strict=True
-    ):
-        summary.update(block)
-    values, counts = np.unique(samples[schema.ECSV_SCAN_FLAG], return_counts=True)
-    report["flag_value_counts"] = {
-        str(int(value)): int(count) for value, count in zip(values, counts, strict=True)
-    }
-    report["total_science_samples"] = len(samples)
-    report["status"] = "complete"
-    report_path.write_text(json.dumps(report, indent=2) + "\n")
-    return report

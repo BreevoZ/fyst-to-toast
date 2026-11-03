@@ -1,4 +1,7 @@
 # Copy this Pong template and edit the field and scan parameters for your observation.
+# This FYST docs example exceeds the az acceleration limit (1.5 deg/s²) above El ≈ 55°.
+# Sky turnaround acceleration per axis ≈ num_terms × velocity² / half-width; az needs about 1/cos(El) more.
+# Lower velocity, fewer terms, a larger field or lower elevation reduce the acceleration.
 name: native Pong
 ra_center: 180
 dec_center: -30

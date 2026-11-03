@@ -67,6 +67,9 @@ scheduling window. Set `--duration-s` to change it. Sampling uses the YAML
 `scan_params.timestep` (0.1 s in the templates), or FYST's default when unset;
 `--sample-rate HZ` overrides it without editing the file.
 
+FYST warns but does not block generation when a pattern exceeds mount limits.
+These warnings are listed in `report.json` under `fyst_warnings`.
+
 Alternatively, build an `ObservingPatch` and call the Python API directly:
 
 ```python
