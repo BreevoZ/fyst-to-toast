@@ -22,7 +22,7 @@ from fyst_to_toast.sim_fyst import SimFYST
 
 
 OWN_TRAITS = set("""
-API trajectory_file trajectory_files trajectory_boresight_angle telescope
+API trajectory_file trajectory_files trajectory_boresight_angle telescope sample_rate_rtol
 weather realization max_pwv median_weather
 use_ephem use_qpoint so3g_compat_mode times shared_flags det_data det_data_units
 det_flags azimuth elevation boresight_azel boresight_radec position velocity
@@ -43,7 +43,7 @@ sun_close_distance sun_up_mask sun_close_mask elnod_mask
 
 
 def test_exact_standalone_traits():
-    assert len(OWN_TRAITS) == 27
+    assert len(OWN_TRAITS) == 28
     assert len(REMOVED_TRAITS) == 43
     assert set(SimFYST.class_trait_names()) == OWN_TRAITS | INHERITED_TRAITS
 

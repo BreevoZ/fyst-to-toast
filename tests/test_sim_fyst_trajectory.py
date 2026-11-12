@@ -195,14 +195,14 @@ def test_geometry_and_caller_instrument(source, data, monkeypatch, n_pix, roll):
         "nominal_rate_hz": 10.0,
         "actual_rate_hz": actual_rate,
         "relative_error": abs(10 - actual_rate) / actual_rate,
-        "rtol": 1e-6,
+        "rtol": 1e-3,
     }
     stored_rate = json.loads(source.metadata["trajectory_info"])["sample_rate_hz"]
     assert info["stored_rate_check"] == {
         "nominal_rate_hz": 10.0,
         "actual_rate_hz": stored_rate,
         "relative_error": abs(10 - stored_rate) / stored_rate,
-        "rtol": 1e-6,
+        "rtol": 1e-3,
         "source": "trajectory_info.sample_rate_hz",
     }
     assert info["roll_deg"] == roll_deg

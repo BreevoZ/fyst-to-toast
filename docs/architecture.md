@@ -143,7 +143,11 @@ temporary TOAST storage.
 Like SimGround, SimFYST takes the nominal rate from
 `telescope.focalplane.sample_rate.to_value(u.Hz)`. It checks that rate against both
 `trajectory_info.sample_rate_hz` and the timestamp-derived actual rate, requiring
-`abs(nominal-compared)/compared <= 1e-6` for each. A mismatch raises `RuntimeError`
+`abs(nominal-compared)/compared <= sample_rate_rtol` for each (default `1e-3`).
+FYST spreads samples evenly over each block, so the measured rate can differ slightly
+from the nominal one. Set `sample_rate_rtol=1e-6` for the old strict check.
+The tolerance must be finite and nonnegative; invalid values raise `ValueError`
+before loading or creating an Observation. A mismatch raises `RuntimeError`
 with the file and both rates; malformed metadata and clocks still raise `ValueError`.
 If the stored rate is absent, legacy files fall back to the timestamp-derived rate.
 Both bundled fixtures have a stored rate. `simfyst_info.rate_check` records the

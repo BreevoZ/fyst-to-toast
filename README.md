@@ -131,7 +131,11 @@ finally:
     data.clear()
 ```
 
-Set `--sample-rate HZ` to override the patch's sampling (templates use 10 Hz); `telescope.focalplane.sample_rate` must match both the stored H5 rate and its timestamps within `rtol=1e-6`.
+Set `--sample-rate HZ` to override the patch's sampling (templates use 10 Hz).
+SimFYST checks `telescope.focalplane.sample_rate` against both the stored H5 rate and
+the timestamp rate with `sample_rate_rtol=1e-3` by default: FYST spreads samples
+evenly over each block, so the measured rate can differ slightly from the nominal one.
+Set `sample_rate_rtol=1e-6` for the old strict check.
 Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGround does.
 
 ## What each Observation contains

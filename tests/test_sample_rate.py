@@ -78,7 +78,7 @@ def telescope_for(path, rate):
     )
 
 
-def apply(path, rate, *, manifest=False):
+def apply(path, rate, *, manifest=False, **kwargs):
     data = Data(Comm(world=None))
     try:
         if manifest:
@@ -87,7 +87,7 @@ def apply(path, rate, *, manifest=False):
             inputs = {"trajectory_files": [listing]}
         else:
             inputs = {"trajectory_file": str(path)}
-        SimFYST(telescope=telescope_for(path, rate), **inputs).apply(data)
+        SimFYST(telescope=telescope_for(path, rate), **inputs, **kwargs).apply(data)
         assert len(data.obs) == 1
         obs = data.obs[0]
         with h5py.File(path) as saved:
@@ -113,8 +113,51 @@ def test_generated20_to_simfyst(generated20):
     for key in ("rate_check", "stored_rate_check"):
         assert info[key]["nominal_rate_hz"] == 20
         assert info[key]["actual_rate_hz"] == pytest.approx(20, rel=1e-6)
-        assert info[key]["relative_error"] <= info[key]["rtol"] == 1e-6
+        assert info[key]["relative_error"] <= info[key]["rtol"] == 1e-3
     assert info["stored_rate_check"]["source"] == "trajectory_info.sample_rate_hz"
+
+
+@pytest.mark.parametrize("relative_error,rtol,passes", [
+    (6.7e-5, None, True),
+    (2e-3, None, False),
+    (6.7e-5, 1e-6, False),
+    (6.7e-5, 1e-4, True),
+])
+def test_sample_rate_tolerance(generated20, tmp_path, relative_error, rtol, passes):
+    # Synthesize a uniform clock on a copy, retaining the existing IO fixture.
+    path = tmp_path / "rate_offset.h5"
+    shutil.copyfile(generated20, path)
+    with h5py.File(path, "r+") as saved:
+        times = saved["shared/times"][()]
+        times = times[0] + np.arange(len(times)) / (20.0 / (1 + relative_error))
+        saved["shared/times"][...] = times
+        attrs = saved["metadata/other"].attrs
+        hashes = json.loads(attrs["shared_array_sha256"])
+        hashes["times"] = hashlib.sha256(times.tobytes()).hexdigest()
+        attrs["shared_array_sha256"] = json.dumps(hashes)
+    actual = (len(times) - 1) / (times[-1] - times[0])
+    set_stored_rate(path, actual)
+    assert abs(20 - actual) / actual == pytest.approx(relative_error, abs=1e-8)
+    kwargs = {} if rtol is None else {"sample_rate_rtol": rtol}
+    if not passes:
+        with pytest.raises(schema._SampleRateMismatch):
+            apply(path, 20, **kwargs)
+        return
+    info = apply(path, 20, **kwargs)
+    for key in ("rate_check", "stored_rate_check"):
+        assert info[key]["rtol"] == (1e-3 if rtol is None else rtol)
+        assert info[key]["relative_error"] == pytest.approx(relative_error, abs=1e-8)
+        assert info[key]["actual_rate_hz"] == actual
+
+
+@pytest.mark.parametrize("rtol", [-1.0, np.nan, np.inf, -np.inf])
+def test_invalid_tolerance_rejected_before_loading(monkeypatch, rtol):
+    def unexpected_load(*args):
+        pytest.fail("Invalid tolerance must be rejected before loading an Observation")
+
+    monkeypatch.setattr(SimFYST, "_load_validate_trajectory", unexpected_load)
+    with pytest.raises(ValueError, match="sample_rate_rtol must be finite and nonnegative"):
+        apply(ROOT / "data/fyst_ces_000_001.h5", 10, sample_rate_rtol=rtol)
 
 
 @pytest.mark.parametrize("manifest", [False, True])

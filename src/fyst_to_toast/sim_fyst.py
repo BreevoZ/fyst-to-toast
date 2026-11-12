@@ -26,7 +26,7 @@ from toast.observation import Observation
 from toast.observation import default_values as defaults
 from toast.ops.operator import Operator
 from toast.timing import function_timer
-from toast.traits import Bool, Instance, Int, List, Quantity, Unicode, Unit, trait_docs
+from toast.traits import Bool, Float, Instance, Int, List, Quantity, Unicode, Unit, trait_docs
 from toast.utils import Logger, name_UID
 from toast.weather import SimWeather
 
@@ -162,6 +162,12 @@ class SimFYST(Operator):
 
     telescope = Instance(
         klass=Telescope, allow_none=True, help="This must be an instance of a Telescope"
+    )
+
+    sample_rate_rtol = Float(
+        1e-3,
+        help="Relative tolerance between telescope.focalplane.sample_rate and both "
+        "the stored H5 rate and the timestamp rate; set 1e-6 for the old strict check",
     )
 
     weather = Unicode(
@@ -353,6 +359,8 @@ class SimFYST(Operator):
 
     def _validate_trajectory_config(self, data, detectors):
         """Reject unsupported settings before loading or allocating an observation."""
+        if not np.isfinite(self.sample_rate_rtol) or self.sample_rate_rtol < 0:
+            raise ValueError("sample_rate_rtol must be finite and nonnegative")
         if self.trajectory_file is not None and self.trajectory_files:
             raise ValueError("trajectory_file and trajectory_files are mutually exclusive")
         if self.telescope is None:
@@ -479,7 +487,7 @@ class SimFYST(Operator):
             ("timestamps", block.actual_rate_hz),
         ):
             try:
-                checks[label] = _check_sample_rate(rate, input_rate, rtol=1e-6)
+                checks[label] = _check_sample_rate(rate, input_rate, rtol=self.sample_rate_rtol)
             except _SampleRateMismatch as error:
                 raise _SampleRateMismatch(f"{source}: focalplane vs {label}: {error}") from error
         rate_check = checks["timestamps"]
