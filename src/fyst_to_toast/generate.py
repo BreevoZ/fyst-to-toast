@@ -135,7 +135,10 @@ def toast_boresight_roll_deg(el_deg, site):
     )
 
 
-def build_trajectory_table(label, science_timeline, pairs, source):
+def build_trajectory_table(
+    label, science_timeline, pairs, source, *,
+    generator="fyst_trajectories.overhead.schedule_to_trajectories",
+):
     """Keep native arrays, units and half-open block slices; do not resample."""
     import numpy as np
     from astropy import units as u
@@ -204,7 +207,7 @@ def build_trajectory_table(label, science_timeline, pairs, source):
         schema.ECSV_CASE: label,
         schema.ECSV_COORDINATE_FRAME: "mount AltAz",
         schema.ECSV_START_UTC: origin.utc.isot,
-        schema.ECSV_GENERATOR: "fyst_trajectories.overhead.schedule_to_trajectories",
+        schema.ECSV_GENERATOR: generator,
         schema.ECSV_SOURCE_SCHEDULE_SHA256: sha256(source),
         schema.ECSV_BLOCKS: blocks,
         schema.ECSV_TIME_NOTE: "time_s since timeline start; block_time_s is unchanged Trajectory.times",
@@ -362,4 +365,144 @@ def generate_trajectory(
         report["total_science_samples"] = len(samples)
         report["status"] = "complete"
         report_path.write_text(json.dumps(report, indent=2) + "\n")
+        return report
+
+
+def generate_window_ces(
+    output_dir,
+    *,
+    az_window,
+    elevation,
+    velocity,
+    start,
+    duration_s,
+    sample_rate_hz=None,
+    az_accel=1.0,
+    detector_offset=None,
+    field=None,
+    iers_file=None,
+    overwrite=False,
+):
+    """Export a native fixed-azimuth-window CES without running the scheduler.
+
+    ``start`` is an Astropy Time or UTC ISO string. FYST validates the planner
+    inputs and rounds ``duration_s`` to whole scan legs; output bounds use the
+    actual first and last samples. ``detector_offset`` is a FYST InstrumentOffset
+    or None, and ``field`` is an optional FieldRegion for FYST's drift warnings.
+    Omit ``sample_rate_hz`` to retain FYST's default timestep.
+
+    The schedule records the commanded boresight envelope. Its ``rising`` flag
+    is true when the requested window midpoint modulo 360 is in (0, 180):
+    elevation rises east of the meridian. It is a summary of this planner's
+    output, not a scheduler reconstruction recipe; use the exported trajectory.
+    No full_timeline.ecsv is written. IERS / ephemeris configuration belongs to
+    the caller; ``iers_file`` only records the selected table and its hash.
+    """
+    import numpy as np
+    from astropy.time import Time
+    from astropy.utils import iers
+
+    import fyst_trajectories
+    from fyst_trajectories import get_absolute_times, get_fyst_site
+    from fyst_trajectories.overhead import (
+        CalibrationPolicy, ObservingTimeline, TimelineBlock, write_timeline,
+        io as overhead_io,
+    )
+    from fyst_trajectories.planning import plan_constant_el_window_scan
+
+    sampling = {}
+    if sample_rate_hz is not None:
+        if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
+            raise ValueError("sample_rate_hz must be finite and positive")
+        sampling["timestep"] = 1.0 / sample_rate_hz
+    start = Time(start, scale="utc", precision=3)
+    folder = Path(output_dir).expanduser().resolve()
+    outputs = [folder / name for name in (
+        "schedule.ecsv", "fyst_trajectory.ecsv", "report.json",
+    )]
+    if not overwrite and any(path.exists() for path in outputs):
+        raise FileExistsError("Outputs exist; choose a new output_dir or specify overwrite.")
+    iers_path = Path(iers_file).expanduser().resolve() if iers_file else None
+    if iers_path is not None:
+        if not iers_path.is_file():
+            raise FileNotFoundError(f"IERS file not found: {iers_path}")
+        if iers_path in outputs:
+            raise ValueError("Outputs must not overwrite the input IERS file")
+
+    planner = "fyst_trajectories.planning.plan_constant_el_window_scan"
+    site = get_fyst_site()
+    with _capture_fyst_warnings() as fyst_warnings:
+        planned = plan_constant_el_window_scan(
+            field, az_window=az_window, elevation=elevation, velocity=velocity,
+            duration=duration_s, site=site, start_time=start, az_accel=az_accel,
+            detector_offset=detector_offset, **sampling,
+        )
+        trajectory = planned.trajectory
+        absolute = get_absolute_times(trajectory)
+        window = [float(value) for value in az_window]
+        offset = asdict(detector_offset) if detector_offset is not None else None
+        block = TimelineBlock(
+            t_start=absolute[0], t_stop=absolute[-1], block_type="science",
+            patch_name="window_ces", az_start=float(np.min(trajectory.az)),
+            az_end=float(np.max(trajectory.az)), elevation=float(trajectory.el[0]),
+            scan_index=0, subscan_index=0, scan_type="constant_el",
+            rising=0.0 < (sum(window) / 2.0) % 360.0 < 180.0,
+            az_final=float(trajectory.az[-1]),
+        )
+        timeline = ObservingTimeline(
+            blocks=[block], site=site, start_time=block.t_start, end_time=block.t_stop,
+            overhead_model=science_only_overhead(), calibration_policy=CalibrationPolicy(),
+            metadata={
+                "planner": planner,
+                "requested_az_window": window,
+                "requested_duration_s": float(duration_s),
+                "detector_offset": {key: offset[key] for key in ("dx", "dy")} if offset else None,
+            },
+        )
+        report = {
+            "case": "ces_window",
+            "status": "complete",
+            "fyst": {
+                "__version__": fyst_trajectories.__version__,
+                "__file__": fyst_trajectories.__file__,
+                "overhead_io_file": overhead_io.__file__,
+                "overhead_io_sha256": sha256(Path(overhead_io.__file__)),
+            },
+            "planner": planner,
+            "planner_inputs": {
+                "az_window": window, "elevation": float(elevation),
+                "velocity": float(velocity), "start_utc": start.utc.isot,
+                "duration_s": float(duration_s), "az_accel": float(az_accel),
+                "sample_rate_hz": float(sample_rate_hz) if sample_rate_hz is not None else None,
+                "timestep": float(planned.config.timestep),
+                "field": asdict(field) if field is not None else None,
+            },
+            "computed_params": dict(planned.computed_params),
+            "detector_offset": offset,
+            "first_sample_utc": block.t_start.utc.isot,
+            "last_sample_utc": block.t_stop.utc.isot,
+            "end_time_note": "FYST's end_time_iso is the requested end; the actual end is the last sample.",
+            "fyst_warnings": fyst_warnings,
+            "iers_file": str(iers_path) if iers_path else None,
+            "iers_sha256": sha256(iers_path) if iers_path else None,
+            "iers_auto_download": iers.conf.auto_download,
+        }
+        if overwrite:
+            for path in outputs:
+                path.unlink(missing_ok=True)
+        folder.mkdir(parents=True, exist_ok=True)
+        source = folder / "schedule.ecsv"
+        write_timeline(timeline, source)
+        samples = build_trajectory_table(
+            "ces_window", timeline, [(block, planned)], source, generator=planner,
+        )
+        samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
+        values, counts = np.unique(samples[schema.ECSV_SCAN_FLAG], return_counts=True)
+        report["flag_value_counts"] = {
+            str(int(value)): int(count) for value, count in zip(values, counts, strict=True)
+        }
+        report["total_science_samples"] = len(samples)
+        report["science_blocks"] = samples.meta[schema.ECSV_BLOCKS]
+        report["source_schedule_sha256"] = sha256(source)
+        (folder / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         return report
