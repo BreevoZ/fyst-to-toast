@@ -7,7 +7,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import hashlib
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,7 +26,82 @@ pytest.importorskip(
 )
 
 from fyst_to_toast import trajectory_h5 as schema
-from fyst_to_toast.generate import build_trajectory_table, generate_trajectory
+from fyst_to_toast.generate import (
+    build_trajectory_table,
+    generate_observing_timeline,
+    generate_trajectory,
+    science_only_overhead,
+)
+
+
+def test_science_only_overhead_preserves_other_fyst_defaults():
+    from fyst_trajectories.overhead import OverheadModel
+
+    default = asdict(OverheadModel())
+    science_only = asdict(science_only_overhead())
+    calibration_fields = {
+        "retune_duration", "pointing_cal_duration", "focus_duration",
+        "skydip_duration", "planet_cal_duration", "beam_map_duration",
+    }
+    assert science_only.keys() == default.keys()
+    assert {key for key in default if science_only[key] != default[key]} == calibration_fields
+    for key, value in science_only.items():
+        assert value == (0.0 if key in calibration_fields else default[key])
+
+
+@pytest.mark.parametrize("value", ["science_only", {}, False])
+def test_invalid_overhead_model_creates_no_output(tmp_path, value, quickstart):
+    patch = quickstart.example_patch("ces")
+    start = Time(quickstart.DEFAULT_START["ces"], scale="utc")
+    with pytest.raises(TypeError, match="overhead_model must be.*OverheadModel"):
+        generate_observing_timeline(patch, start, 1800, overhead_model=value)
+    folder = tmp_path / "generation"
+    with pytest.raises(TypeError, match="overhead_model must be.*OverheadModel"):
+        generate_trajectory(
+            patch, folder, start=start, duration_s=1800, overhead_model=value,
+        )
+    assert not folder.exists()
+
+
+@pytest.mark.parametrize("selection,preset", [
+    ("none", "fyst_default"), ("science_only", "science_only"),
+    ("fyst_default", "fyst_default"), ("custom", "custom"),
+])
+def test_report_overhead_presets(tmp_path, quickstart, selection, preset):
+    import json
+    from fyst_trajectories.overhead import OverheadModel
+
+    models = {
+        "none": None,
+        "science_only": science_only_overhead(),
+        "fyst_default": OverheadModel(),
+        "custom": replace(science_only_overhead(), settle_time=7.0),
+    }
+    model = models[selection]
+    expected = OverheadModel() if model is None else model
+    with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
+        report = generate_trajectory(
+            quickstart.example_patch("ces"), tmp_path,
+            start=quickstart.DEFAULT_START["ces"], duration_s=1, overhead_model=model,
+        )
+    assert report["status"] == "no_science"
+    assert report["overhead_preset"] == preset
+    assert report["overhead_model"] == asdict(expected)
+    assert json.loads((tmp_path / "report.json").read_text()) == report
+
+
+def test_explicit_science_only_generation(tmp_path, quickstart):
+    with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
+        report = generate_trajectory(
+            quickstart.example_patch("ces"), tmp_path,
+            start=quickstart.DEFAULT_START["ces"], duration_s=1800,
+            overhead_model=science_only_overhead(),
+        )
+    assert report["status"] == "complete"
+    assert report["overhead_preset"] == "science_only"
+    assert report["block_counts"].get("calibration", 0) == 0
+    samples = QTable.read(tmp_path / "fyst_trajectory.ecsv")
+    assert len(samples) == report["total_science_samples"] > 0
 
 
 @pytest.mark.parametrize("rate", [0, -1, np.nan, np.inf, -np.inf])

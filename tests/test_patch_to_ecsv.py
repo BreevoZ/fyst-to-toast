@@ -14,7 +14,9 @@ pytest.importorskip("fyst_trajectories", exc_type=ImportError)
 
 import yaml
 from astropy.table import QTable
-from fyst_trajectories.overhead import ObservingPatch
+from fyst_trajectories.overhead import ObservingPatch, OverheadModel
+
+from fyst_to_toast.generate import science_only_overhead
 
 
 @pytest.mark.parametrize("case,scan_type,timestep_index", [
@@ -125,7 +127,10 @@ def test_cli_rejects_invalid_yaml(quickstart, tmp_path, monkeypatch, capsys, con
 
 
 @pytest.mark.parametrize("custom", [False, True])
-def test_cli_default_output_directory(quickstart, custom_patch_file, tmp_path, monkeypatch, custom):
+@pytest.mark.parametrize("with_calibrations", [False, True])
+def test_cli_default_output_directory(
+    quickstart, custom_patch_file, tmp_path, monkeypatch, custom, with_calibrations,
+):
     # Capture the destination without writing into the repository's default output/.
     calls = []
 
@@ -137,6 +142,8 @@ def test_cli_default_output_directory(quickstart, custom_patch_file, tmp_path, m
     monkeypatch.setattr(quickstart, "generate_trajectory", capture)
     selection = (["--patch-file", str(custom_patch_file), "--start", "2026-03-15T04:00:00"]
                  if custom else ["ces"])
+    if with_calibrations:
+        selection.append("--with-calibrations")
     monkeypatch.setattr(sys, "argv", ["patch_to_ecsv.py", *selection])
     quickstart.main()
     patch, folder, kwargs = calls[0]
@@ -144,5 +151,9 @@ def test_cli_default_output_directory(quickstart, custom_patch_file, tmp_path, m
     assert folder == tmp_path / "output/generated" / (custom_patch_file.stem if custom else "ces")
     assert kwargs["sample_rate_hz"] is None
     assert kwargs["duration_s"] == 10800
+    if with_calibrations:
+        assert kwargs["overhead_model"] == OverheadModel()
+    else:
+        assert kwargs["overhead_model"] == science_only_overhead()
     if not custom:
         assert kwargs["start"].utc.isot == quickstart.DEFAULT_START["ces"] + ".000"

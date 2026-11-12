@@ -22,10 +22,10 @@ Callers configure these before numerical imports and coordinate transformations.
 ## Generation and ECSV
 
 The generator supports CES, Daisy, and Pong. It calls the native FYST scheduler
-with default overhead settings, then reconstructs science trajectories from the
+with FYST's default overhead, then reconstructs science trajectories from the
 written schedule. It preserves scan/subscan IDs, samples, and block boundaries.
 `generate_trajectory(patch, output_dir, *, start, duration_s, sample_rate_hz=None,
-iers_file=None, overwrite=False)` requires a FYST `ObservingPatch`, an Astropy
+overhead_model=None, iers_file=None, overwrite=False)` requires a FYST `ObservingPatch`, an Astropy
 `Time` or UTC ISO start, and a scheduling duration including overhead. The
 quick-start script loads `ObservingPatch` arguments with `yaml.safe_load` from
 `examples/patches/{ces,daisy,pong}.yaml` or a caller's `--patch-file PATH`.
@@ -35,6 +35,13 @@ the YAML templates own the scan parameters, including their 0.1-second timestep.
 Invalid YAML or rejected constructor arguments produce a CLI error naming the file.
 The library has no example inputs. A window without science
 produces only the full timeline and a report; the CLI exits unsuccessfully.
+The Python API follows FYST: `overhead_model=None` uses FYST's default calibrations.
+Pass `science_only_overhead()` to zero all six calibration durations while retaining
+FYST's default settle time and min/max scan durations; slews and settling still consume time.
+The CLI explicitly passes `science_only_overhead()` by default, or `OverheadModel()`
+with `--with-calibrations`. Non-None values must be `OverheadModel` instances and
+are validated before output is created. The report retains `overhead_model` and
+adds `overhead_preset`: `science_only`, `fyst_default`, or `custom`, by model equality.
 An optional finite, positive `sample_rate_hz` overrides the timestep on a copy of
 the patch. Otherwise its `scan_params["timestep"]` is preserved, or FYST supplies
 the default when unset. The CLI's `--sample-rate HZ` defaults to no override and

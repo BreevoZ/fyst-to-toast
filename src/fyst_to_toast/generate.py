@@ -53,12 +53,33 @@ def _capture_fyst_warnings():
         warnings.showwarning = original_showwarning
 
 
-def generate_observing_timeline(patch, start, duration_s):
-    """Run FYST with OverheadModel() defaults and the legacy 30 s scheduler step."""
+def science_only_overhead():
+    """Disable calibrations while retaining FYST's settling and scan limits."""
+    from fyst_trajectories.overhead import OverheadModel
+
+    return replace(
+        OverheadModel(),
+        retune_duration=0.0,
+        pointing_cal_duration=0.0,
+        focus_duration=0.0,
+        skydip_duration=0.0,
+        planet_cal_duration=0.0,
+        beam_map_duration=0.0,
+    )
+
+
+def generate_observing_timeline(patch, start, duration_s, overhead_model=None):
+    """Run the FYST scheduler with the given overhead and a 30 s scheduler step.
+
+    ``overhead_model=None`` means FYST's default calibrations, as in FYST.
+    Pass ``science_only_overhead()`` for science-only scheduling.
+    """
     from astropy.time import TimeDelta
     from fyst_trajectories import get_fyst_site
     from fyst_trajectories.overhead import OverheadModel, generate_timeline
 
+    if overhead_model is not None and not isinstance(overhead_model, OverheadModel):
+        raise TypeError("overhead_model must be a fyst_trajectories.overhead.OverheadModel")
     if not math.isfinite(duration_s) or duration_s <= 0:
         raise ValueError("duration-s must be finite and positive")
     return generate_timeline(
@@ -66,7 +87,7 @@ def generate_observing_timeline(patch, start, duration_s):
         site=get_fyst_site(),
         start_time=start,
         end_time=start + TimeDelta(duration_s, format="sec"),
-        overhead_model=OverheadModel(),
+        overhead_model=overhead_model,
         time_step=30,
     )
 
@@ -200,8 +221,14 @@ def _initial_report(
     from astropy.utils import iers
 
     import fyst_trajectories
-    from fyst_trajectories.overhead import io as overhead_io
+    from fyst_trajectories.overhead import OverheadModel, io as overhead_io
 
+    if timeline.overhead_model == science_only_overhead():
+        overhead_preset = "science_only"
+    elif timeline.overhead_model == OverheadModel():
+        overhead_preset = "fyst_default"
+    else:
+        overhead_preset = "custom"
     science = timeline.science_blocks
     timestep = patch.scan_params.get("timestep")
     report = {
@@ -216,6 +243,7 @@ def _initial_report(
             "overhead_io_sha256": sha256(Path(overhead_io.__file__)),
         },
         "overhead_model": asdict(timeline.overhead_model),
+        "overhead_preset": overhead_preset,
         "window_start_utc": start.utc.isot,
         "window_stop_utc": timeline.end_time.utc.isot,
         "window_s": float(duration_s),
@@ -250,6 +278,7 @@ def generate_trajectory(
     start,
     duration_s,
     sample_rate_hz=None,
+    overhead_model=None,
     iers_file=None,
     overwrite=False,
 ):
@@ -257,6 +286,11 @@ def generate_trajectory(
 
     ``start`` is an Astropy Time or UTC ISO string; ``duration_s`` is the
     scheduling window including overhead. Both must be supplied by the caller.
+
+    ``overhead_model=None`` means FYST's default calibrations, as in FYST.
+    Pass ``science_only_overhead()`` to zero calibration durations while keeping
+    slews, settling and scan limits, or another ``OverheadModel`` instance for
+    custom overhead.
 
     IERS / ephemeris configuration belongs to the caller. ``iers_file`` records
     the caller's selected table and hash; it does not install that table.
@@ -267,10 +301,12 @@ def generate_trajectory(
     import numpy as np
     from astropy.time import Time
 
-    from fyst_trajectories.overhead import ObservingPatch
+    from fyst_trajectories.overhead import ObservingPatch, OverheadModel
 
     if not isinstance(patch, ObservingPatch):
         raise TypeError("patch must be a fyst_trajectories.overhead.ObservingPatch")
+    if overhead_model is not None and not isinstance(overhead_model, OverheadModel):
+        raise TypeError("overhead_model must be a fyst_trajectories.overhead.OverheadModel")
     try:
         label = SCAN_TYPE_LABELS[patch.scan_type]
     except KeyError:
@@ -294,7 +330,7 @@ def generate_trajectory(
             raise ValueError("Outputs must not overwrite the input IERS file")
 
     with _capture_fyst_warnings() as fyst_warnings:
-        timeline = generate_observing_timeline(patch, start, duration_s)
+        timeline = generate_observing_timeline(patch, start, duration_s, overhead_model)
         report = _initial_report(patch, label, timeline, start, duration_s, iers_path)
         report["fyst_warnings"] = fyst_warnings
         if overwrite:

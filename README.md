@@ -67,6 +67,10 @@ scheduling window. Set `--duration-s` to change it. Sampling uses the YAML
 `scan_params.timestep` (0.1 s in the templates), or FYST's default when unset;
 `--sample-rate HZ` overrides it without editing the file.
 
+The CLI defaults to science-only: calibration durations are 0, but slews and
+settle time remain, so science does not fill 100% of the window.
+Use `--with-calibrations` for FYST's default calibrations.
+
 FYST warns but does not block generation when a pattern exceeds mount limits.
 These warnings are listed in `report.json` under `fyst_warnings`.
 
@@ -76,17 +80,19 @@ Alternatively, build an `ObservingPatch` and call the Python API directly:
 from astropy.coordinates import solar_system_ephemeris
 from astropy.utils import iers
 from fyst_trajectories.overhead import ObservingPatch
-from fyst_to_toast.generate import generate_trajectory
+from fyst_to_toast.generate import generate_trajectory, science_only_overhead
 iers.conf.auto_download = False
 patch = ObservingPatch(name="my Pong", ra_center=185, dec_center=-35,
                       width=1.2, height=1.0, scan_type="pong", velocity=0.3)
 with solar_system_ephemeris.set("builtin"):
     report = generate_trajectory(patch, "output/my_patch", start="2026-03-15T04:00:00",
-                                 duration_s=1800)
+                                 duration_s=1800, overhead_model=science_only_overhead())
 ```
 
 Omit `sample_rate_hz` to use the patch's `scan_params["timestep"]` or FYST's default
 when unset. An override leaves the original patch unchanged.
+The Python API follows FYST: `overhead_model=None` uses FYST's default calibrations.
+Pass `overhead_model=science_only_overhead()` for science-only, as shown above.
 
 ### Load the generated observations
 

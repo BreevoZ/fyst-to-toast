@@ -25,6 +25,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 from fyst_to_toast.generate import (
     OUTPUT_NAMES,
     generate_trajectory,
+    science_only_overhead,
 )
 
 
@@ -81,6 +82,9 @@ def main():
     parser.add_argument(
         "--sample-rate", type=float, default=None, metavar="HZ",
         help="Override sampling rate; default: patch timestep or FYST default (templates: 10 Hz)",
+    )
+    parser.add_argument(
+        "--with-calibrations", action="store_true", help="Use FYST's default calibrations"
     )
     parser.add_argument(
         "--output-dir", type=Path,
@@ -146,6 +150,12 @@ def main():
         )
     except ValueError as error:
         parser.error(f"Cannot parse UTC start: {error}")
+    if args.with_calibrations:
+        from fyst_trajectories.overhead import OverheadModel
+
+        overhead_model = OverheadModel()
+    else:
+        overhead_model = science_only_overhead()
     report = generate_trajectory(
         patch,
         folder,
@@ -154,6 +164,7 @@ def main():
         sample_rate_hz=args.sample_rate,
         iers_file=iers_path,
         overwrite=args.overwrite,
+        overhead_model=overhead_model,
     )
     if report["status"] == "no_science":
         raise SystemExit(
