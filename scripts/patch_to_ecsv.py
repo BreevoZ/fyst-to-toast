@@ -139,6 +139,8 @@ def main():
     from astropy.utils import iers
 
     iers.conf.auto_download = False
+    # Offline runs may use bundled predictions older than Astropy's age limit.
+    iers.conf.auto_max_age = None
     iers.conf.iers_degraded_accuracy = "error"
     if iers_path is not None:
         iers.earth_orientation_table.set(iers.IERS_A.open(str(iers_path)))
@@ -166,6 +168,8 @@ def main():
         overwrite=args.overwrite,
         overhead_model=overhead_model,
     )
+    report["iers_auto_max_age"] = iers.conf.auto_max_age
+    (folder / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     if report["status"] == "no_science":
         raise SystemExit(
             f"No science in this window; saved full_timeline.ecsv and {folder / 'report.json'}"

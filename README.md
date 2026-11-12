@@ -94,6 +94,29 @@ when unset. An override leaves the original patch unchanged.
 The Python API follows FYST: `overhead_model=None` uses FYST's default calibrations.
 Pass `overhead_model=science_only_overhead()` for science-only, as shown above.
 
+### Fixed-azimuth-window CES
+
+Requires FYST trajectories >= 0.13. For Deep56 rising:
+
+```bash
+export RUN_DIR=output/generated/window_ces
+python scripts/window_ces_to_ecsv.py --az-window 50 76 --elevation 50 --velocity 1 \
+    --start 2026-08-13T03:48:45.147 --duration-s 14400 --module i6
+python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"
+```
+
+This calls FYST's `plan_constant_el_window_scan` directly, bypassing the scheduler:
+one block, with no calibrations, slews or subscan splitting. `--module` moves the
+boresight so the selected module sweeps the window. Optional
+`--field RA DEC WIDTH HEIGHT` enables FYST's drift warnings; all four values are degrees.
+
+Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`; convert to H5
+as usual. The schedule is a summary: FYST's `schedule_to_trajectories` returns no
+trajectories for it, so use `fyst_trajectory.ecsv`.
+Both generation CLIs allow older bundled IERS predictions offline via
+`auto_max_age=None`, recorded as `iers_auto_max_age` in the report; use `--iers-file`
+to supply another offline table.
+
 ### Load the generated observations
 
 ```python

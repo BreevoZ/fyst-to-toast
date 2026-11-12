@@ -379,6 +379,7 @@ def generate_window_ces(
     sample_rate_hz=None,
     az_accel=1.0,
     detector_offset=None,
+    detector_label=None,
     field=None,
     iers_file=None,
     overwrite=False,
@@ -389,6 +390,7 @@ def generate_window_ces(
     inputs and rounds ``duration_s`` to whole scan legs; output bounds use the
     actual first and last samples. ``detector_offset`` is a FYST InstrumentOffset
     or None, and ``field`` is an optional FieldRegion for FYST's drift warnings.
+    Optional ``detector_label`` records the module name in the report and schedule.
     Omit ``sample_rate_hz`` to retain FYST's default timestep.
 
     The schedule records the commanded boresight envelope. Its ``rising`` flag
@@ -487,6 +489,9 @@ def generate_window_ces(
             "iers_sha256": sha256(iers_path) if iers_path else None,
             "iers_auto_download": iers.conf.auto_download,
         }
+        if detector_label is not None:
+            timeline.metadata["detector_label"] = detector_label
+            report["detector_label"] = detector_label
         if overwrite:
             for path in outputs:
                 path.unlink(missing_ok=True)

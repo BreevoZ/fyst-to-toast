@@ -59,6 +59,7 @@ def test_cli_custom_yaml_completes(quickstart, custom_patch_file, tmp_path, monk
     quickstart.main()
     report = json.loads((folder / "report.json").read_text())
     assert report["status"] == "complete"
+    assert report["iers_auto_max_age"] is None
     assert report["case"] == "pong"
     assert report["patch_name"] == "custom YAML Pong"
     assert report["requested_sample_rate_hz"] == (5.0 if rate is None else rate)
@@ -136,6 +137,7 @@ def test_cli_default_output_directory(
 
     def capture(patch, output_dir, **kwargs):
         calls.append((patch, output_dir, kwargs))
+        output_dir.mkdir(parents=True)
         return {"status": "complete"}
 
     monkeypatch.setattr(quickstart, "REPO", tmp_path)

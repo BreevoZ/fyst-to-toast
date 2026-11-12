@@ -56,6 +56,20 @@ The `case` label remains `ces`, `daisy` or `pong`, derived from `scan_type`
 (`constant_el` maps to `ces`), preserving downstream H5 names. Other scan types
 raise `ValueError`; non-patch inputs raise `TypeError`.
 
+For FYST >= 0.13, `scripts/window_ces_to_ecsv.py` calls `generate_window_ces`, which
+uses `plan_constant_el_window_scan` directly: one block without scheduler
+calibrations, slews or subscan splitting. `--module` resolves FYST's module offset
+so that module sweeps the requested window; its name is recorded as
+`detector_label` in the report and schedule header when supplied.
+Optional `--field RA DEC WIDTH HEIGHT` supplies a `FieldRegion` for drift warnings.
+Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`, followed by
+the usual H5 writer. The schedule is a summary, not a reconstruction recipe:
+FYST's `schedule_to_trajectories` returns no trajectories for it.
+Both generation CLIs disable IERS downloads and set `auto_max_age=None` to allow
+older bundled predictions, recording `iers_auto_max_age: null` in the report.
+They retain `iers_degraded_accuracy="error"` and accept an offline `--iers-file`;
+the library leaves IERS configuration to its caller.
+
 | ECSV columns | Units and meaning |
 |---|---|
 | `timestamp_unix_s` | Absolute UTC Unix seconds |

@@ -95,6 +95,13 @@ def test_window_geometry_and_contract(tmp_path, with_offset):
     }
 
 
+def test_detector_label_metadata(tmp_path):
+    report = generate(tmp_path, detector_offset=get_primecam_offset("i6"), detector_label="i6")
+    assert report["detector_label"] == "i6"
+    assert json.loads((tmp_path / "report.json").read_text())["detector_label"] == "i6"
+    assert read_timeline(tmp_path / "schedule.ecsv").metadata["detector_label"] == "i6"
+
+
 def test_setting_window(tmp_path):
     generate(tmp_path, az_window=(283, 309), start="2026-09-11T06:32:37.457")
     block, = read_timeline(tmp_path / "schedule.ecsv").science_blocks
