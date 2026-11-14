@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fyst-to-toast"
-version = "0.2.0"
+version = "0.3.0"
 description = "Feed FYST telescope trajectories into TOAST simulations"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,9 +19,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Used by fyst_to_toast.generate / scripts/patch_to_ecsv.py and optional FYST tests.
-# 0.12 marks schedule boresight_angle as the TOAST roll with a convention header.
-fyst = ["fyst-trajectories>=0.12"]
+# Used by fyst_to_toast.generate, the two generation scripts and optional FYST tests.
+# 0.12 marks schedule boresight_angle as the TOAST roll with a convention header;
+# 0.13 adds plan_constant_el_window_scan, used by generate_window_ces.
+fyst = ["fyst-trajectories>=0.13"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

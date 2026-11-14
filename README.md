@@ -11,7 +11,7 @@ FYST scheduler ─► schedule.ecsv ──────────────�
 
 ## Status
 
-Experimental **0.2.0**, tested with TOAST 3.0.5 and FYST trajectories 0.12.0.
+Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.13.0.
 
 - Serial execution only (no MPI).
 - Included focalplanes are demonstrations; real Nasmyth ports and module clocking are not validated.
@@ -33,7 +33,7 @@ This is enough to read H5 files and run SimFYST. Generating trajectories also ne
 FYST, which is installed from its release tag:
 
 ```bash
-python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.12.0"
+python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.13.0"
 ```
 
 ## Quick start
