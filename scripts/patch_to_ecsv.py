@@ -1,11 +1,25 @@
-"""Quick-start example: YAML patch → native schedule → per-sample ECSV.
+r"""Quick-start example: YAML patch → native schedule → per-sample ECSV.
 
-Copy a template from examples/patches/ and pass --patch-file with --start.
-Users may also build an ObservingPatch in Python and call generate_trajectory
-without editing src/.
+Examples (from the repository root):
+  python scripts/patch_to_ecsv.py ces  # or daisy, pong
+  python scripts/patch_to_ecsv.py --patch-file examples/patches/ces.yaml \
+      --start 2026-08-02T01:25:00.000 --duration-s 10800
+  python scripts/patch_to_ecsv.py ces --with-calibrations
+  python scripts/patch_to_ecsv.py ces --sample-rate 20
+
+YAML keys are ObservingPatch arguments; templates: examples/patches/.
+Minimal CES (angles in deg, velocity in deg/s, timestep in s):
+  name: my CES
+  ra_center: 330
+  dec_center: -50
+  width: 30
+  height: 8
+  scan_type: constant_el
+  velocity: 1
+  elevation: 50
+  scan_params: {timestep: 0.1, az_accel: 1.0}
 
 Adapted from the author's earlier local scheduling and trajectory examples.
-
 Call native APIs and save their arrays without rescheduling, splitting, or resampling.
 """
 
@@ -64,7 +78,9 @@ def example_patch(case):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "case", nargs="?", choices=["ces", "daisy", "pong"],
         help="Shortcut for examples/patches/<case>.yaml; use this or --patch-file",

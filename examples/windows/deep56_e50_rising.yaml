@@ -1,0 +1,14 @@
+# Deep56 rising window at El 50 from the PrimeCam observing schedule.
+# For the setting side use az_window: [283, 309].
+# Supply --start/--duration-s per scan.
+az_window: [50, 76]  # Azimuth bounds, deg.
+elevation: 50  # Elevation, deg.
+velocity: 1  # Azimuth coordinate rate, deg/s; on-sky speed = v*cos(El).
+az_accel: 1.0  # Azimuth acceleration, deg/s^2; optional, default 1.0.
+timestep: 0.1  # Sample interval, s; optional, FYST default when absent.
+module: i6  # Optional PrimeCam module; omit for no detector offset.
+field:  # Optional, used only for FYST drift warnings; all values in deg.
+  ra_center: 20  # Right ascension of field center, deg.
+  dec_center: -3  # Declination of field center, deg.
+  width: 60  # Field width, deg.
+  height: 14  # Field height, deg.

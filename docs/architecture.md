@@ -58,10 +58,15 @@ raise `ValueError`; non-patch inputs raise `TypeError`.
 
 For FYST >= 0.13, `scripts/window_ces_to_ecsv.py` calls `generate_window_ces`, which
 uses `plan_constant_el_window_scan` directly: one block without scheduler
-calibrations, slews or subscan splitting. `--module` resolves FYST's module offset
-so that module sweeps the requested window; its name is recorded as
-`detector_label` in the report and schedule header when supplied.
-Optional `--field RA DEC WIDTH HEIGHT` supplies a `FieldRegion` for drift warnings.
+calibrations, slews or subscan splitting. It requires `--window-file PATH`,
+`--start UTC` and `--duration-s S`. The YAML mapping requires `az_window`, `elevation`
+and `velocity`; optional keys are `az_accel` (default 1.0), `timestep`, `module`
+and `field`. Unknown/missing keys and invalid types fail before output is created.
+`module` resolves FYST's offset and records `detector_label` in the report and
+schedule header. `field` supplies exactly `ra_center`, `dec_center`, `width`,
+`height` to `FieldRegion` for drift warnings. `--sample-rate HZ` overrides the YAML
+timestep via the existing library API; omitting both retains FYST's default.
+Output defaults to `output/generated/<YAML stem>/` unless `--output-dir` is given.
 Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`, followed by
 the usual H5 writer. The schedule is a summary, not a reconstruction recipe:
 FYST's `schedule_to_trajectories` returns no trajectories for it.

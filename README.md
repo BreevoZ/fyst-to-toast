@@ -99,16 +99,19 @@ Pass `overhead_model=science_only_overhead()` for science-only, as shown above.
 Requires FYST trajectories >= 0.13. For Deep56 rising:
 
 ```bash
-export RUN_DIR=output/generated/window_ces
-python scripts/window_ces_to_ecsv.py --az-window 50 76 --elevation 50 --velocity 1 \
-    --start 2026-08-13T03:48:45.147 --duration-s 14400 --module i6
+export RUN_DIR=output/generated/deep56_e50_rising
+python scripts/window_ces_to_ecsv.py --window-file examples/windows/deep56_e50_rising.yaml \
+    --start 2026-08-13T03:48:45.147 --duration-s 14400
 python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"
 ```
 
 This calls FYST's `plan_constant_el_window_scan` directly, bypassing the scheduler:
-one block, with no calibrations, slews or subscan splitting. `--module` moves the
-boresight so the selected module sweeps the window. Optional
-`--field RA DEC WIDTH HEIGHT` enables FYST's drift warnings; all four values are degrees.
+one block, with no calibrations, slews or subscan splitting. The [YAML template](examples/windows/deep56_e50_rising.yaml)
+defines required `az_window`, `elevation`, `velocity` and optional `az_accel`,
+`timestep`, `module`, `field`. `module` moves the boresight so that module sweeps
+the window; `field` is only for FYST drift warnings. `--sample-rate HZ` overrides
+the YAML timestep; otherwise FYST supplies its default when absent.
+Output defaults to `output/generated/<YAML stem>/`; use `--output-dir` to change it.
 
 Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`; convert to H5
 as usual. The schedule is a summary: FYST's `schedule_to_trajectories` returns no

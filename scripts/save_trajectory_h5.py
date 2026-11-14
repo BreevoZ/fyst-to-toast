@@ -1,4 +1,12 @@
-"""Write an existing FYST trajectory ECSV as TOAST Observation HDF5.
+r"""Write an existing FYST trajectory ECSV as TOAST Observation HDF5.
+
+Examples (from the repository root, after generating a CES run):
+  python scripts/save_trajectory_h5.py output/generated/ces/fyst_trajectory.ecsv
+  python scripts/save_trajectory_h5.py output/generated/ces/fyst_trajectory.ecsv \
+      --output-dir output/ces_hdf5 --overwrite
+
+Reads fyst_trajectory.ecsv and schedule.ecsv beside it (or --schedule PATH).
+Writes hdf5/ beside the trajectory unless --output-dir is supplied.
 
 Adapted from the author's earlier local FYST example (source SHA-256 ca2c9b3e…).
 Preserve native blocks, samples, five illustrative detectors, and the TOAST SaveHDF5 schema.
@@ -29,7 +37,9 @@ def read_site_metadata(schedule):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "trajectory", type=Path, help="Input fyst_trajectory.ecsv"
     )
