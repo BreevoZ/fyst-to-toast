@@ -133,8 +133,8 @@ def test_cli_template(window_cli, required, captured, tmp_path, monkeypatch, rat
     assert kwargs["elevation"] == 50 and kwargs["velocity"] == 1
     assert kwargs["az_accel"] == 1.0
     assert kwargs["sample_rate_hz"] == (10.0 if rate is None else rate)
-    assert kwargs["detector_offset"] == get_primecam_offset("i6")
-    assert kwargs["detector_label"] == "i6"
+    assert kwargs["detector_offset"] == get_primecam_offset("IM1")
+    assert kwargs["detector_label"] == "IM1"
     assert kwargs["field"] == FieldRegion(20, -3, 60, 14)
     assert TEMPLATE.read_bytes() == original
 
@@ -171,6 +171,14 @@ def test_cli_bad_module(window_file, captured, reject):
     with pytest.raises(KeyError) as native_error:
         get_primecam_offset("invalid-module")
     reject(messages=(str(window_file), "module", native_error.value.args[0]))
+    assert not captured
+
+
+def test_cli_rejects_legacy_ring_label(window_file, captured, reject):
+    label = "i6"
+    with window_file.open("a") as stream:
+        stream.write(f"module: {label}\n")
+    reject(messages=(f"Unknown PrimeCam module '{label}'", "are no longer defined"))
     assert not captured
 
 
@@ -271,7 +279,7 @@ def test_cli_bad_arguments(captured, reject, arguments, message):
 
 @pytest.mark.parametrize("arguments", [
     ["--az-window", "50", "76"], ["--elevation", "50"], ["--velocity", "1"],
-    ["--az-accel", "1"], ["--module", "i6"], ["--field", "20", "-3", "60", "14"],
+    ["--az-accel", "1"], ["--module", "IM1"], ["--field", "20", "-3", "60", "14"],
 ])
 def test_cli_old_flags_rejected(captured, reject, arguments):
     reject(*arguments, messages=(f"unrecognized arguments: {' '.join(arguments)}",))

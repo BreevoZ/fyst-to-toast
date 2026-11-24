@@ -6,7 +6,7 @@ elevation: 50  # Elevation, deg.
 velocity: 1  # Azimuth coordinate rate, deg/s; on-sky speed = v*cos(El).
 az_accel: 1.0  # Azimuth acceleration, deg/s^2; optional, default 1.0.
 timestep: 0.1  # Sample interval, s; optional, FYST default when absent.
-module: i6  # Optional PrimeCam module; omit for no detector offset.
+module: IM1  # Example bay only. Actual module placement is unspecified.
 field:  # Optional, used only for FYST drift warnings; all values in deg.
   ra_center: 20  # Right ascension of field center, deg.
   dec_center: -3  # Declination of field center, deg.

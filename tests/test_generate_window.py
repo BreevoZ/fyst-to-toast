@@ -47,7 +47,7 @@ def generate(folder, **kwargs):
 
 @pytest.mark.parametrize("with_offset", [False, True])
 def test_window_geometry_and_contract(tmp_path, with_offset):
-    offset = get_primecam_offset("i6") if with_offset else None
+    offset = get_primecam_offset("IM1") if with_offset else None
     report = generate(tmp_path, detector_offset=offset)
     assert {path.name for path in tmp_path.iterdir()} == OUTPUTS
     samples = QTable.read(tmp_path / "fyst_trajectory.ecsv")
@@ -72,9 +72,9 @@ def test_window_geometry_and_contract(tmp_path, with_offset):
     az = samples["az_deg"].value
     el = samples["el_deg"].value
     if with_offset:
-        np.testing.assert_allclose(el, 51.762172213508194, rtol=0, atol=1e-9)
-        np.testing.assert_allclose([az.min(), az.max()], [49.77168162606553, 77.02168162606553], atol=1e-9, rtol=0)
-        assert az.min() - 49.375 == pytest.approx(0.40, abs=0.01)
+        np.testing.assert_allclose(el, 51.40406372647897, rtol=0, atol=1e-9)
+        np.testing.assert_allclose([az.min(), az.max()], [51.10232411073114, 78.35232411073115], atol=1e-9, rtol=0)
+        assert az.min() - 49.375 == pytest.approx(1.73, abs=0.01)
         assert report["detector_offset"] == asdict(offset)
     else:
         np.testing.assert_array_equal(el, np.full(len(samples), 50.0))
@@ -96,10 +96,10 @@ def test_window_geometry_and_contract(tmp_path, with_offset):
 
 
 def test_detector_label_metadata(tmp_path):
-    report = generate(tmp_path, detector_offset=get_primecam_offset("i6"), detector_label="i6")
-    assert report["detector_label"] == "i6"
-    assert json.loads((tmp_path / "report.json").read_text())["detector_label"] == "i6"
-    assert read_timeline(tmp_path / "schedule.ecsv").metadata["detector_label"] == "i6"
+    report = generate(tmp_path, detector_offset=get_primecam_offset("IM1"), detector_label="IM1")
+    assert report["detector_label"] == "IM1"
+    assert json.loads((tmp_path / "report.json").read_text())["detector_label"] == "IM1"
+    assert read_timeline(tmp_path / "schedule.ecsv").metadata["detector_label"] == "IM1"
 
 
 def test_setting_window(tmp_path):
@@ -116,7 +116,7 @@ def test_window_h5_to_simfyst(tmp_path):
     from toast.mpi import Comm
     from fyst_to_toast.sim_fyst import SimFYST
 
-    report = generate(tmp_path, detector_offset=get_primecam_offset("i6"), sample_rate_hz=10)
+    report = generate(tmp_path, detector_offset=get_primecam_offset("IM1"), sample_rate_hz=10)
     source = tmp_path / "fyst_trajectory.ecsv"
     samples = QTable.read(source)
     meta = QTable.read(tmp_path / "schedule.ecsv").meta

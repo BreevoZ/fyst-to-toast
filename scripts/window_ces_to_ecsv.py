@@ -11,7 +11,7 @@ YAML keys (see examples/windows/):
   velocity: DEG/S     required, azimuth coordinate rate; sky speed = v*cos(El)
   az_accel: DEG/S^2   optional, default 1.0
   timestep: S         optional, FYST default; --sample-rate HZ overrides it
-  module: NAME        optional, FYST PrimeCam module (e.g. i6)
+  module: NAME        optional, FYST PrimeCam module (e.g. IM1)
   field:              optional, used only for FYST drift warnings; all in deg
     ra_center: RA
     dec_center: DEC
