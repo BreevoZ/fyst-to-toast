@@ -393,10 +393,8 @@ def generate_window_ces(
     Optional ``detector_label`` records the module name in the report and schedule.
     Omit ``sample_rate_hz`` to retain FYST's default timestep.
 
-    The schedule records the commanded boresight envelope. Its ``rising`` flag
-    is true when the requested window midpoint modulo 360 is in (0, 180):
-    elevation rises east of the meridian. It is a summary of this planner's
-    output, not a scheduler reconstruction recipe; use the exported trajectory.
+    The schedule records the commanded boresight envelope and the inputs
+    for FYST's ``schedule_to_trajectories`` to replay the whole scan.
     No full_timeline.ecsv is written. IERS / ephemeris configuration belongs to
     the caller; ``iers_file`` only records the selected table and its hash.
     """
@@ -439,17 +437,12 @@ def generate_window_ces(
             duration=duration_s, site=site, start_time=start, az_accel=az_accel,
             detector_offset=detector_offset, **sampling,
         )
-        trajectory = planned.trajectory
-        absolute = get_absolute_times(trajectory)
+        absolute = get_absolute_times(planned.trajectory)
         window = [float(value) for value in az_window]
         offset = asdict(detector_offset) if detector_offset is not None else None
-        block = TimelineBlock(
-            t_start=absolute[0], t_stop=absolute[-1], block_type="science",
-            patch_name="window_ces", az_start=float(np.min(trajectory.az)),
-            az_end=float(np.max(trajectory.az)), elevation=float(trajectory.el[0]),
-            scan_index=0, subscan_index=0, scan_type="constant_el",
-            rising=0.0 < (sum(window) / 2.0) % 360.0 < 180.0,
-            az_final=float(trajectory.az[-1]),
+        block = TimelineBlock.from_window_scan(
+            planned, site=site, patch_name="window_ces", scan_index=0,
+            field=field, detector_offset=detector_offset,
         )
         timeline = ObservingTimeline(
             blocks=[block], site=site, start_time=block.t_start, end_time=block.t_stop,
@@ -481,8 +474,8 @@ def generate_window_ces(
             },
             "computed_params": dict(planned.computed_params),
             "detector_offset": offset,
-            "first_sample_utc": block.t_start.utc.isot,
-            "last_sample_utc": block.t_stop.utc.isot,
+            "first_sample_utc": absolute[0].utc.isot,
+            "last_sample_utc": absolute[-1].utc.isot,
             "end_time_note": "FYST's end_time_iso is the requested end; the actual end is the last sample.",
             "fyst_warnings": fyst_warnings,
             "iers_file": str(iers_path) if iers_path else None,

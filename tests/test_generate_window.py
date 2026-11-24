@@ -19,8 +19,8 @@ from astropy.utils import iers
 
 pytest.importorskip("fyst_trajectories", exc_type=ImportError)
 
-from fyst_trajectories import get_primecam_offset
-from fyst_trajectories.overhead import CalibrationPolicy, read_timeline
+from fyst_trajectories import get_absolute_times, get_primecam_offset
+from fyst_trajectories.overhead import CalibrationPolicy, read_timeline, schedule_to_trajectories
 from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.generate import generate_window_ces, science_only_overhead, sha256
 
@@ -222,3 +222,26 @@ def test_missing_iers_creates_no_output(tmp_path):
     with pytest.raises(FileNotFoundError, match="IERS file not found"):
         generate(folder, iers_file=tmp_path / "missing")
     assert not folder.exists()
+
+
+@pytest.mark.parametrize("module,velocity", [(None, 1), ("IM1", 1), (None, 3)])
+def test_window_schedule_replays_exported_samples(tmp_path, module, velocity):
+    offset = get_primecam_offset(module) if module else None
+    report = generate(tmp_path, duration_s=100, velocity=velocity, detector_offset=offset, sample_rate_hz=10)
+    samples = QTable.read(tmp_path / "fyst_trajectory.ecsv")
+    timeline = read_timeline(tmp_path / "schedule.ecsv")
+    block, = timeline.blocks
+    assert block.metadata["window_scan"]["az_window"] == [50, 76]
+    (_, scan), = schedule_to_trajectories(timeline)
+    trajectory = scan.trajectory
+    absolute = get_absolute_times(trajectory)
+    np.testing.assert_array_equal(trajectory.times, samples["block_time_s"].to_value(u.s))
+    np.testing.assert_array_equal((absolute - timeline.start_time).sec, samples["time_s"].to_value(u.s))
+    np.testing.assert_array_equal(absolute.unix, samples["timestamp_unix_s"].to_value(u.s))
+    np.testing.assert_array_equal(trajectory.az, samples["az_deg"].to_value(u.deg))
+    np.testing.assert_array_equal(trajectory.el, samples["el_deg"].to_value(u.deg))
+    np.testing.assert_array_equal(trajectory.scan_flag, samples["scan_flag"])
+    assert report["first_sample_utc"] == absolute[0].utc.isot
+    assert report["last_sample_utc"] == absolute[-1].utc.isot
+    if velocity == 3:
+        assert 0 < abs((block.t_stop - absolute[-1]).to_value(u.ms)) <= 0.5
