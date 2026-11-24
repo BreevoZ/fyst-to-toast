@@ -155,12 +155,13 @@ def test_cli_optional_inputs(window_cli, required, window_file, captured, tmp_pa
     folder = tmp_path / "generated"
     monkeypatch.setattr(sys, "argv", [
         "window_ces_to_ecsv.py", *required, "--output-dir", str(folder),
-        "--sample-rate", "20", "--iers-file", str(table_path), "--overwrite",
+        "--sample-rate", "20", "--max-block-s", "42", "--iers-file", str(table_path), "--overwrite",
     ])
     window_cli.main()
     destination, kwargs = captured[0]
     assert destination == folder
     assert kwargs["sample_rate_hz"] == 20.0 and kwargs["az_accel"] == 0.5
+    assert kwargs["max_block_s"] == 42
     assert kwargs["iers_file"] == table_path and opened == [str(table_path)]
     assert kwargs["overwrite"] is True
 
@@ -271,6 +272,7 @@ def test_cli_missing_yaml_file(window_file, captured, reject):
     (["--sample-rate", "0"], "--sample-rate must be finite and positive"),
     (["--sample-rate", "inf"], "--sample-rate must be finite and positive"),
     (["--start", "invalid-time"], "Cannot parse UTC start"),
+    (["--max-block-s", "nan"], "--max-block-s must be finite and positive"),
 ])
 def test_cli_bad_arguments(captured, reject, arguments, message):
     reject(*arguments, messages=(message,))

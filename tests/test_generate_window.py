@@ -110,13 +110,17 @@ def test_setting_window(tmp_path):
 
 
 def test_window_h5_to_simfyst(tmp_path):
+    report = generate(tmp_path, detector_offset=get_primecam_offset("IM1"), sample_rate_hz=10)
+    check_h5_to_simfyst(tmp_path, report, 1)
+
+
+def check_h5_to_simfyst(tmp_path, report, block_count):
     from toast import Data
     from toast.instrument import GroundSite, Telescope
     from toast.instrument_sim import fake_boresight_focalplane
     from toast.mpi import Comm
     from fyst_to_toast.sim_fyst import SimFYST
 
-    report = generate(tmp_path, detector_offset=get_primecam_offset("IM1"), sample_rate_hz=10)
     source = tmp_path / "fyst_trajectory.ecsv"
     samples = QTable.read(source)
     meta = QTable.read(tmp_path / "schedule.ecsv").meta
@@ -127,22 +131,108 @@ def test_window_h5_to_simfyst(tmp_path):
         longitude_deg=meta["site_lon"].to_value(u.deg), height_m=meta["site_alt"].to_value(u.m),
         output_dir=folder, source_sha256=sha256(source),
     )
-    assert len(names) == 1
+    assert len(names) == block_count
     telescope = Telescope(
         "window-test", site=GroundSite(meta["site_name"], meta["site_lat"], meta["site_lon"], meta["site_alt"]),
         focalplane=fake_boresight_focalplane(n_pix=1, sample_rate=10 * u.Hz),
     )
     data = Data(Comm(world=None))
     try:
-        SimFYST(telescope=telescope, trajectory_file=str(folder / names[0])).apply(data)
-        assert len(data.obs) == 1
-        obs = data.obs[0]
-        assert obs.n_all_samples == report["total_science_samples"]
-        np.testing.assert_array_equal(obs.shared["times"].data, samples["timestamp_unix_s"].value)
-        info = json.loads(obs["simfyst_info"])
-        assert info["rate_check"]["rtol"] == info["stored_rate_check"]["rtol"] == 1e-3
+        paths = [str(folder / name) for name in names]
+        inputs = {"trajectory_file": paths[0]} if block_count == 1 else {"trajectory_files": paths}
+        SimFYST(telescope=telescope, **inputs).apply(data)
+        assert len(data.obs) == block_count
+        assert sum(obs.n_all_samples for obs in data.obs) == report["total_science_samples"]
+        for obs, block in zip(data.obs, report["science_blocks"], strict=True):
+            sl = slice(block["first"], block["last"])
+            np.testing.assert_array_equal(obs.shared["times"].data, samples["timestamp_unix_s"][sl].value)
+            info = json.loads(obs["simfyst_info"])
+            assert info["rate_check"]["rtol"] == info["stored_rate_check"]["rtol"] == 1e-3
     finally:
         data.clear()
+
+
+def test_split_deep56_window(tmp_path):
+    from fyst_trajectories.planning import FieldRegion
+
+    inputs = {
+        "duration_s": 14400, "field": FieldRegion(20, -3, 60, 14),
+        "detector_offset": get_primecam_offset("IM1"), "detector_label": "IM1", "sample_rate_hz": 10,
+    }
+    whole = tmp_path / "whole"
+    generate(whole, **inputs)
+    reference = QTable.read(whole / "fyst_trajectory.ecsv")
+    folder = tmp_path / "split"
+    report = generate(folder, max_block_s=3600, **inputs)
+    timeline = read_timeline(folder / "schedule.ecsv")
+    samples = QTable.read(folder / "fyst_trajectory.ecsv")
+    assert report["computed_params"]["duration"] == 14390
+    assert len(timeline.blocks) == 4
+    assert len(samples) == len(reference) == report["total_science_samples"] == 143901
+    # Only the subscan ID and the block-local clock change on splitting.
+    for name in set(reference.colnames) - {"subscan_index", "block_time_s"}:
+        np.testing.assert_array_equal(samples[name], reference[name])
+    pairs = schedule_to_trajectories(timeline)
+    assert len(pairs) == 4
+    first = 0
+    for i, ((block, scan), meta) in enumerate(zip(pairs, report["science_blocks"], strict=True)):
+        assert (block.scan_index, block.subscan_index) == (0, i)
+        assert block.duration == pytest.approx(3597.5, abs=1e-9)
+        if i:
+            assert block.t_start == pairs[i - 1][0].t_stop
+        trajectory = scan.trajectory
+        last = first + len(trajectory.times)
+        assert (meta["first"], meta["last"]) == (first, last)
+        chunk = samples[first:last]
+        np.testing.assert_array_equal(chunk["subscan_index"], i)
+        np.testing.assert_array_equal(chunk["timestamp_unix_s"].value, get_absolute_times(trajectory).unix)
+        for column, native in [("block_time_s", "times"), ("az_deg", "az"), ("el_deg", "el"),
+                               ("az_velocity", "az_vel"), ("el_velocity", "el_vel"), ("scan_flag", "scan_flag")]:
+            np.testing.assert_array_equal(chunk[column].value, getattr(trajectory, native))
+        first = last
+    assert first == len(reference)
+    check_h5_to_simfyst(folder, report, 4)
+
+
+@pytest.mark.parametrize("limit", [110, 120])
+def test_whole_scan_limit_is_byte_identical(tmp_path, limit):
+    default = tmp_path / "default"
+    report = generate(default)
+    assert report["computed_params"]["duration"] == 110
+    limited = tmp_path / "limited"
+    generate(limited, max_block_s=limit)
+    for name in OUTPUTS:
+        assert (limited / name).read_bytes() == (default / name).read_bytes()
+
+
+def test_rounded_split_edges(tmp_path):
+    report = generate(tmp_path, max_block_s=40)
+    timeline = read_timeline(tmp_path / "schedule.ecsv")
+    samples = QTable.read(tmp_path / "fyst_trajectory.ecsv")
+    pairs = schedule_to_trajectories(timeline)
+    # A 110 s scan split in thirds needs millisecond rounding at both joins.
+    assert [round(block.duration * 1000) for block, _ in pairs] == [36667, 36666, 36667]
+    times = np.concatenate([get_absolute_times(scan.trajectory).unix for _, scan in pairs])
+    np.testing.assert_array_equal(times, samples["timestamp_unix_s"].value)
+    assert (np.diff(times) > 0).all()
+    assert len(times) == report["total_science_samples"] == 1101
+
+
+@pytest.mark.parametrize("limit", [0, -1, np.inf, -np.inf, np.nan])
+def test_invalid_block_limit(tmp_path, limit):
+    with pytest.raises(ValueError, match="max_block_s must be finite and positive"):
+        generate(tmp_path, max_block_s=limit)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("limit,start,message", [
+    (0.05, START, "two samples"),
+    (40, "2026-08-13T03:48:45.147320", "millisecond"),
+], ids=["too-few-samples", "submillisecond-start"])
+def test_unrepresentable_split(tmp_path, limit, start, message):
+    with pytest.raises(ValueError, match=message):
+        generate(tmp_path, max_block_s=limit, start=start)
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("rate", [None, 10.0, 20.0])

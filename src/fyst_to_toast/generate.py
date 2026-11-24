@@ -12,6 +12,7 @@ import warnings
 from collections import Counter
 from contextlib import contextmanager
 from dataclasses import asdict, replace
+from itertools import pairwise
 from pathlib import Path
 
 from fyst_to_toast import trajectory_h5 as schema
@@ -138,6 +139,7 @@ def toast_boresight_roll_deg(el_deg, site):
 def build_trajectory_table(
     label, science_timeline, pairs, source, *,
     generator="fyst_trajectories.overhead.schedule_to_trajectories",
+    scan_clock=None,
 ):
     """Keep native arrays, units and half-open block slices; do not resample."""
     import numpy as np
@@ -150,7 +152,12 @@ def build_trajectory_table(
     offset = 0
     for block, planned in pairs:
         trajectory = planned.trajectory
-        absolute = get_absolute_times(trajectory)
+        # A split window keeps its original absolute clock. Re-adding a block's
+        # re-zeroed times to its first instant can round differently in Astropy.
+        if scan_clock is None:
+            absolute = get_absolute_times(trajectory)
+        else:
+            absolute = scan_clock[offset:offset + len(trajectory.times)]
         chunk = QTable()
         chunk[schema.ECSV_TIME_S] = (absolute - origin).sec * u.s
         chunk[schema.ECSV_BLOCK_TIME_S] = trajectory.times * u.s
@@ -373,6 +380,51 @@ def generate_trajectory(
         return report
 
 
+def _window_spans(planned, max_block_s):
+    """Shared edges of equal-duration blocks, or FYST's whole-scan sentinel."""
+    import numpy as np
+    from astropy.time import Time, TimeDelta
+
+    if max_block_s is None or max_block_s >= planned.duration:
+        return [None]
+    start = planned.trajectory.start_time
+    if start.unix != Time(start.utc.isot, scale="utc").unix:
+        raise ValueError("Split window start must be representable to the millisecond in ECSV")
+    ratio = planned.duration / max_block_s
+    if ratio > len(planned.trajectory.times) // 2:
+        raise ValueError("max_block_s is too short for two samples per block")
+    offsets = np.linspace(0, planned.duration, math.ceil(ratio) + 1)
+    edges = start + TimeDelta(offsets, format="sec")
+    # FYST uses the stored millisecond form of these shared edges in memory too.
+    return pairwise(edges)
+
+
+def _window_pairs(timeline, planned, absolute):
+    """Check that FYST's replayed block clocks partition the original clock."""
+    import numpy as np
+    from fyst_trajectories.overhead import schedule_to_trajectories
+
+    if len(timeline.blocks) == 1:
+        return [(timeline.blocks[0], planned)]
+    pairs = schedule_to_trajectories(timeline)
+    if len(pairs) != len(timeline.blocks):
+        raise RuntimeError("FYST skipped a window block during replay")
+    first = 0
+    for _, scan in pairs:
+        traj = scan.trajectory
+        last = first + len(traj.times)
+        expected = planned.trajectory.times[first:last]
+        # The native slice resets its local clock. Check its origin as well,
+        # since distinct blocks can have identical local times.
+        if (last > len(absolute) or traj.start_time.unix != absolute[first].unix
+                or not np.array_equal(traj.times, expected - expected[0])):
+            raise ValueError("Window spans do not partition the scan at FYST's time precision")
+        first = last
+    if first != len(absolute):
+        raise ValueError("Window spans do not cover the end of the scan")
+    return pairs
+
+
 def generate_window_ces(
     output_dir,
     *,
@@ -381,6 +433,7 @@ def generate_window_ces(
     velocity,
     start,
     duration_s,
+    max_block_s=None,
     sample_rate_hz=None,
     az_accel=1.0,
     detector_offset=None,
@@ -397,6 +450,9 @@ def generate_window_ces(
     or None, and ``field`` is an optional FieldRegion for FYST's drift warnings.
     Optional ``detector_label`` records the module name in the report and schedule.
     Omit ``sample_rate_hz`` to retain FYST's default timestep.
+    A finite positive ``max_block_s`` splits the built duration D into
+    ceil(D / max_block_s) equal spans. None or a limit >= D keeps the whole
+    scan. Split schedules use millisecond UTC and require two samples per block.
 
     The schedule records the commanded boresight envelope and the inputs
     for FYST's ``schedule_to_trajectories`` to replay the whole scan.
@@ -416,6 +472,8 @@ def generate_window_ces(
     from fyst_trajectories.planning import plan_constant_el_scan
 
     sampling = {}
+    if max_block_s is not None and (not math.isfinite(max_block_s) or max_block_s <= 0):
+        raise ValueError("max_block_s must be finite and positive")
     if sample_rate_hz is not None:
         if not math.isfinite(sample_rate_hz) or sample_rate_hz <= 0:
             raise ValueError("sample_rate_hz must be finite and positive")
@@ -445,12 +503,15 @@ def generate_window_ces(
         absolute = get_absolute_times(planned.trajectory)
         window = [float(value) for value in az_window]
         offset = asdict(detector_offset) if detector_offset is not None else None
-        block = TimelineBlock.from_window_scan(
-            planned, site=site, patch_name="window_ces", scan_index=0,
-            field=field, detector_offset=detector_offset,
-        )
+        blocks = [
+            TimelineBlock.from_window_scan(
+                planned, site=site, patch_name="window_ces", scan_index=0, subscan_index=i,
+                field=field, detector_offset=detector_offset, span=span,
+            )
+            for i, span in enumerate(_window_spans(planned, max_block_s))
+        ]
         timeline = ObservingTimeline(
-            blocks=[block], site=site, start_time=block.t_start, end_time=block.t_stop,
+            blocks=blocks, site=site, start_time=blocks[0].t_start, end_time=blocks[-1].t_stop,
             overhead_model=science_only_overhead(), calibration_policy=CalibrationPolicy(),
             metadata={
                 "planner": planner,
@@ -490,6 +551,7 @@ def generate_window_ces(
         if detector_label is not None:
             timeline.metadata["detector_label"] = detector_label
             report["detector_label"] = detector_label
+        pairs = _window_pairs(timeline, planned, absolute)
         if overwrite:
             for path in outputs:
                 path.unlink(missing_ok=True)
@@ -497,7 +559,8 @@ def generate_window_ces(
         source = folder / "schedule.ecsv"
         write_timeline(timeline, source)
         samples = build_trajectory_table(
-            "ces_window", timeline, [(block, planned)], source, generator=planner,
+            "ces_window", timeline, pairs, source, generator=planner,
+            scan_clock=absolute if len(blocks) > 1 else None,
         )
         samples.write(folder / "fyst_trajectory.ecsv", format="ascii.ecsv")
         values, counts = np.unique(samples[schema.ECSV_SCAN_FLAG], return_counts=True)

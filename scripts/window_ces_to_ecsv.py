@@ -121,6 +121,11 @@ def main():
     parser.add_argument("--start", required=True, metavar="UTC", help="UTC ISO time (milliseconds)")
     parser.add_argument("--duration-s", type=float, required=True, metavar="S")
     parser.add_argument(
+        "--max-block-s", type=float, metavar="S",
+        help="Split the built scan into equal blocks of at most S seconds; "
+             "omit or set S >= the built duration to keep one identical block",
+    )
+    parser.add_argument(
         "--sample-rate", type=float, metavar="HZ",
         help="Override YAML timestep; otherwise FYST default if absent",
     )
@@ -135,7 +140,7 @@ def main():
         "--overwrite", action="store_true", help="Allow replacing this script's three output files",
     )
     args = parser.parse_args()
-    for name in ("duration_s", "sample_rate"):
+    for name in ("duration_s", "sample_rate", "max_block_s"):
         value = getattr(args, name)
         if value is not None and (not math.isfinite(value) or value <= 0):
             parser.error(f"--{name.replace('_', '-')} must be finite and positive")
@@ -184,6 +189,7 @@ def main():
             iers.earth_orientation_table.set(iers.IERS_A.open(str(iers_path)))
         report = generate_window_ces(
             folder, **window, start=start, duration_s=args.duration_s,
+            max_block_s=args.max_block_s,
             iers_file=iers_path, overwrite=args.overwrite,
         )
     except (ValueError, TypeError, OSError) as error:
