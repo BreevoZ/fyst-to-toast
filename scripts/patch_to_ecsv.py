@@ -5,7 +5,7 @@ Examples (from the repository root):
   python scripts/patch_to_ecsv.py --patch-file examples/patches/ces.yaml \
       --start 2026-08-02T01:25:00.000 --duration-s 10800
   python scripts/patch_to_ecsv.py ces --with-calibrations
-  python scripts/patch_to_ecsv.py ces --sample-rate 20
+  python scripts/patch_to_ecsv.py ces --sample-rate 5
 
 YAML keys are ObservingPatch arguments; templates: examples/patches/.
 Minimal CES (angles in deg, velocity in deg/s, timestep in s):
@@ -97,7 +97,8 @@ def main():
     )
     parser.add_argument(
         "--sample-rate", type=float, default=None, metavar="HZ",
-        help="Override sampling rate; default: patch timestep or FYST default (templates: 10 Hz)",
+        help="Override the patch timestep (FYST default: 10 Hz). The scheduler accepts at most "
+             "20 Hz (Go TCS /path minimum interval: 0.05 s).",
     )
     parser.add_argument(
         "--with-calibrations", action="store_true", help="Use FYST's default calibrations"
@@ -174,16 +175,22 @@ def main():
         overhead_model = OverheadModel()
     else:
         overhead_model = science_only_overhead()
-    report = generate_trajectory(
-        patch,
-        folder,
-        start=start,
-        duration_s=args.duration_s,
-        sample_rate_hz=args.sample_rate,
-        iers_file=iers_path,
-        overwrite=args.overwrite,
-        overhead_model=overhead_model,
-    )
+    try:
+        report = generate_trajectory(
+            patch,
+            folder,
+            start=start,
+            duration_s=args.duration_s,
+            sample_rate_hz=args.sample_rate,
+            iers_file=iers_path,
+            overwrite=args.overwrite,
+            overhead_model=overhead_model,
+        )
+    except ValueError as error:
+        # FYST uses a plain ValueError for the scheduler's sample interval limit.
+        if not str(error).startswith("patches whose sample interval is under the Go TCS /path minimum of "):
+            raise
+        parser.error(str(error))
     report["iers_auto_max_age"] = iers.conf.auto_max_age
     (folder / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     if report["status"] == "no_science":

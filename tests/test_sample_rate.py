@@ -36,25 +36,25 @@ def offline_geometry():
 
 
 @pytest.fixture(scope="module", params=[("ces", 1470), ("daisy", 1500), ("pong", 2280)])
-def generated20(request, tmp_path_factory, quickstart):
+def generated5(request, tmp_path_factory, quickstart):
     pytest.importorskip("fyst_trajectories", exc_type=ImportError)
     from fyst_to_toast.generate import generate_trajectory
 
     case, duration = request.param
-    folder = tmp_path_factory.mktemp(f"rate20_{case}")
+    folder = tmp_path_factory.mktemp(f"rate5_{case}")
     with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
         report = generate_trajectory(
             quickstart.example_patch(case),
             folder, start=quickstart.DEFAULT_START[case],
-            duration_s=duration, sample_rate_hz=20.0,
+            duration_s=duration, sample_rate_hz=5.0,
         )
         assert report["status"] == "complete"
-        assert report["requested_sample_rate_hz"] == 20.0
+        assert report["requested_sample_rate_hz"] == 5.0
         source = folder / "fyst_trajectory.ecsv"
         samples = QTable.read(source)
         assert len(samples) > 0
         assert np.any(samples["scan_flag"] == 1)
-        assert all(b["requested_timestep_s"] == 0.05 for b in samples.meta["blocks"])
+        assert all(b["requested_timestep_s"] == 0.2 for b in samples.meta["blocks"])
         site = QTable.read(folder / "schedule.ecsv").meta
         hdf5 = folder / "hdf5"
         hdf5.mkdir()
@@ -108,12 +108,25 @@ def set_stored_rate(path, value):
         attrs["trajectory_info"] = json.dumps(info)
 
 
-def test_generated20_to_simfyst(generated20):
-    info = apply(generated20, 20)
-    for key in ("rate_check", "stored_rate_check"):
-        assert info[key]["nominal_rate_hz"] == 20
-        assert info[key]["actual_rate_hz"] == pytest.approx(20, rel=1e-6)
-        assert info[key]["relative_error"] <= info[key]["rtol"] == 1e-3
+def read_h5_rates(path):
+    with h5py.File(path) as saved:
+        times = saved["shared/times"]
+        info = json.loads(saved["metadata/other"].attrs["trajectory_info"])
+        return {
+            "timestamps": (len(times) - 1) / (times[-1] - times[0]),
+            "trajectory_info.sample_rate_hz": info["sample_rate_hz"],
+        }
+
+
+def test_generated5_to_simfyst(generated5):
+    info = apply(generated5, 5)
+    rates = read_h5_rates(generated5)
+    for key, source in [("rate_check", "timestamps"), ("stored_rate_check", "trajectory_info.sample_rate_hz")]:
+        check = info[key]
+        assert check["nominal_rate_hz"] == 5
+        assert check["actual_rate_hz"] == rates[source]
+        assert check["relative_error"] == abs(5 - rates[source]) / rates[source]
+        assert check["relative_error"] <= check["rtol"] == 1e-3
     assert info["stored_rate_check"]["source"] == "trajectory_info.sample_rate_hz"
 
 
@@ -123,13 +136,13 @@ def test_generated20_to_simfyst(generated20):
     (6.7e-5, 1e-6, False),
     (6.7e-5, 1e-4, True),
 ])
-def test_sample_rate_tolerance(generated20, tmp_path, relative_error, rtol, passes):
+def test_sample_rate_tolerance(generated5, tmp_path, relative_error, rtol, passes):
     # Synthesize a uniform clock on a copy, retaining the existing IO fixture.
     path = tmp_path / "rate_offset.h5"
-    shutil.copyfile(generated20, path)
+    shutil.copyfile(generated5, path)
     with h5py.File(path, "r+") as saved:
         times = saved["shared/times"][()]
-        times = times[0] + np.arange(len(times)) / (20.0 / (1 + relative_error))
+        times = times[0] + np.arange(len(times)) / (5.0 / (1 + relative_error))
         saved["shared/times"][...] = times
         attrs = saved["metadata/other"].attrs
         hashes = json.loads(attrs["shared_array_sha256"])
@@ -137,13 +150,13 @@ def test_sample_rate_tolerance(generated20, tmp_path, relative_error, rtol, pass
         attrs["shared_array_sha256"] = json.dumps(hashes)
     actual = (len(times) - 1) / (times[-1] - times[0])
     set_stored_rate(path, actual)
-    assert abs(20 - actual) / actual == pytest.approx(relative_error, abs=1e-8)
+    assert abs(5 - actual) / actual == pytest.approx(relative_error, abs=1e-8)
     kwargs = {} if rtol is None else {"sample_rate_rtol": rtol}
     if not passes:
         with pytest.raises(schema._SampleRateMismatch):
-            apply(path, 20, **kwargs)
+            apply(path, 5, **kwargs)
         return
-    info = apply(path, 20, **kwargs)
+    info = apply(path, 5, **kwargs)
     for key in ("rate_check", "stored_rate_check"):
         assert info[key]["rtol"] == (1e-3 if rtol is None else rtol)
         assert info[key]["relative_error"] == pytest.approx(relative_error, abs=1e-8)
@@ -161,29 +174,30 @@ def test_invalid_tolerance_rejected_before_loading(monkeypatch, rtol):
 
 
 @pytest.mark.parametrize("manifest", [False, True])
-def test_generated20_rejects_10hz_focalplane(generated20, tmp_path, manifest):
-    path = tmp_path / generated20.name
-    shutil.copyfile(generated20, path)
+def test_generated5_rejects_10hz_focalplane(generated5, tmp_path, manifest):
+    path = tmp_path / generated5.name
+    shutil.copyfile(generated5, path)
     with pytest.raises(RuntimeError) as error:
         apply(path, 10, manifest=manifest)
     message = str(error.value)
     assert str(path) in message and "Nominal sample rate 10 Hz" in message
-    assert "trajectory_info.sample_rate_hz" in message and "actual 20" in message
+    stored = read_h5_rates(path)["trajectory_info.sample_rate_hz"]
+    assert "trajectory_info.sample_rate_hz" in message and f"actual {stored:.12g} Hz" in message
 
 
 @pytest.mark.parametrize("manifest", [False, True])
-@pytest.mark.parametrize("nominal,comparison", [(20, "trajectory_info.sample_rate_hz"), (40, "timestamps")])
-def test_stored_and_measured_rates_checked_independently(generated20, tmp_path, manifest, nominal, comparison):
+@pytest.mark.parametrize("nominal,comparison", [(5, "trajectory_info.sample_rate_hz"), (10, "timestamps")])
+def test_stored_and_measured_rates_checked_independently(generated5, tmp_path, manifest, nominal, comparison):
     path = tmp_path / "tampered.h5"
-    shutil.copyfile(generated20, path)
-    set_stored_rate(path, 40.0)
-    # At 40 Hz the stored check passes, but the original 20 Hz timestamps must fail.
+    shutil.copyfile(generated5, path)
+    set_stored_rate(path, 10.0)
+    # A 5 Hz focalplane disagrees with the stored rate. At 10 Hz only the timestamps disagree.
     with pytest.raises(RuntimeError) as error:
         apply(path, nominal, manifest=manifest)
     message = str(error.value)
     assert str(path) in message and f"focalplane vs {comparison}:" in message
     assert f"Nominal sample rate {nominal} Hz" in message
-    assert "actual 40 Hz" in message if nominal == 20 else "actual 20" in message
+    assert f"actual {read_h5_rates(path)[comparison]:.12g} Hz" in message
 
 
 @pytest.mark.parametrize("name", ["fyst_ces_000_001.h5", "fyst_daisy_003_000.h5"])

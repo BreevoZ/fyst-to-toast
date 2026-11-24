@@ -223,8 +223,8 @@ def test_report_records_actual_iers_configuration(auto_download, quickstart):
         assert iers.conf.auto_download is auto_download
 
 
-@pytest.mark.parametrize("timestep", [None, 0.2])
-@pytest.mark.parametrize("rate", [None, 20.0])
+@pytest.mark.parametrize("timestep", [None, 0.25])
+@pytest.mark.parametrize("rate", [None, 5.0])
 def test_custom_patch_and_sampling_override(tmp_path, timestep, rate):
     """A caller-defined field keeps its identity and immutable sampling inputs."""
     from fyst_trajectories.overhead import ObservingPatch, read_timeline, schedule_to_trajectories
@@ -275,6 +275,16 @@ def test_custom_patch_and_sampling_override(tmp_path, timestep, rate):
     assert list(patch.scan_params.items()) == list(params.items())
     with pytest.raises(TypeError):
         patch.scan_params["timestep"] = 99
+
+
+@pytest.mark.parametrize("rate", [25, 488])
+def test_scheduler_rejects_rate_above_go_tcs_limit(tmp_path, quickstart, rate):
+    patch = quickstart.example_patch("ces")
+    with pytest.raises(ValueError, match=r"Go TCS /path minimum of 0\.05 s: native CES"):
+        generate_trajectory(
+            patch, tmp_path, start=quickstart.DEFAULT_START["ces"], duration_s=1800,
+            sample_rate_hz=rate,
+        )
 
 
 @pytest.mark.parametrize("value", ["pong", None, {}])

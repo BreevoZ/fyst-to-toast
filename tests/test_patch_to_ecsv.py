@@ -39,12 +39,12 @@ def custom_patch_file(tmp_path):
         "name: custom YAML Pong\nra_center: 185\ndec_center: -35\n"
         "width: 1.2\nheight: 1.0\nscan_type: pong\nvelocity: 0.3\n"
         "scan_params:\n  spacing: 0.1\n  num_terms: 4\n"
-        "  timestep: 0.2\n  angle: 15.0\n"
+        "  timestep: 0.25\n  angle: 15.0\n"
     )
     return path
 
 
-@pytest.mark.parametrize("rate", [None, 20.0])
+@pytest.mark.parametrize("rate", [None, 5.0])
 def test_cli_custom_yaml_completes(quickstart, custom_patch_file, tmp_path, monkeypatch, rate):
     folder = tmp_path / "generated"
     original = custom_patch_file.read_bytes()
@@ -62,13 +62,40 @@ def test_cli_custom_yaml_completes(quickstart, custom_patch_file, tmp_path, monk
     assert report["iers_auto_max_age"] is None
     assert report["case"] == "pong"
     assert report["patch_name"] == "custom YAML Pong"
-    assert report["requested_sample_rate_hz"] == (5.0 if rate is None else rate)
+    assert report["requested_sample_rate_hz"] == (4.0 if rate is None else rate)
     samples = QTable.read(folder / "fyst_trajectory.ecsv")
     assert samples.meta["case"] == "pong"
     assert len(samples) == report["total_science_samples"] > 0
-    expected_step = 0.2 if rate is None else 1.0 / rate
+    expected_step = 0.25 if rate is None else 1.0 / rate
     assert all(block["requested_timestep_s"] == expected_step for block in samples.meta["blocks"])
     assert custom_patch_file.read_bytes() == original
+
+
+def test_cli_reports_go_tcs_rate_limit(quickstart, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [
+        "patch_to_ecsv.py", "ces", "--sample-rate", "25", "--output-dir", str(tmp_path),
+    ])
+    with pytest.raises(SystemExit) as error:
+        quickstart.main()
+    assert error.value.code == 2
+    stderr = capsys.readouterr().err
+    assert stderr.endswith(
+        "error: patches whose sample interval is under the Go TCS /path minimum of 0.05 s: "
+        "native CES (timestep 0.04 s)\n"
+    )
+    assert "Traceback" not in stderr
+
+
+def test_cli_propagates_other_generation_errors(quickstart, tmp_path, monkeypatch):
+    def fail(*args, **kwargs):
+        raise ValueError("unrelated generation error")
+
+    monkeypatch.setattr(quickstart, "generate_trajectory", fail)
+    monkeypatch.setattr(sys, "argv", [
+        "patch_to_ecsv.py", "ces", "--sample-rate", "25", "--output-dir", str(tmp_path),
+    ])
+    with pytest.raises(ValueError, match="unrelated generation error"):
+        quickstart.main()
 
 
 @pytest.mark.parametrize("selection,message", [

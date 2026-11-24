@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.mark.parametrize("script,example", [
-    ("patch_to_ecsv.py", "  python scripts/patch_to_ecsv.py ces --sample-rate 20\n"),
+    ("patch_to_ecsv.py", "  python scripts/patch_to_ecsv.py ces --sample-rate 5\n"),
     ("window_ces_to_ecsv.py", "      --window-file examples/windows/deep56_e50_rising.yaml \\\n"),
     ("save_trajectory_h5.py", "  python scripts/save_trajectory_h5.py output/generated/ces/fyst_trajectory.ecsv\n"),
 ])
