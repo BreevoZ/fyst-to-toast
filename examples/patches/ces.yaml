@@ -10,3 +10,4 @@ elevation: 50
 scan_params:
   timestep: 0.1
   az_accel: 1.0
+# module: IM1  # Optional Prime-Cam bay; schedules the patch for that module.

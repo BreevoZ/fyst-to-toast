@@ -86,6 +86,61 @@ def test_cli_reports_go_tcs_rate_limit(quickstart, tmp_path, monkeypatch, capsys
     assert "Traceback" not in stderr
 
 
+@pytest.mark.parametrize("case", ["ces", "pong"])
+def test_cli_patch_module(quickstart, tmp_path, monkeypatch, case):
+    from dataclasses import asdict
+
+    from fyst_trajectories import get_primecam_offset
+    from fyst_trajectories.overhead import read_timeline
+
+    path = tmp_path / f"{case}.yaml"
+    path.write_text((quickstart.PATCH_DIR / path.name).read_text() + "module: IM1\n")
+    patch = quickstart.load_patch(path)
+    offset = get_primecam_offset("IM1")
+    assert patch.detector_offset == offset
+    folder = tmp_path / "generated"
+    monkeypatch.setattr(sys, "argv", [
+        "patch_to_ecsv.py", "--patch-file", str(path), "--start", quickstart.DEFAULT_START[case],
+        "--duration-s", "1800", "--output-dir", str(folder),
+    ])
+    quickstart.main()
+    report = json.loads((folder / "report.json").read_text())
+    schedule = read_timeline(folder / "schedule.ecsv")
+    assert report["detector_label"] == schedule.metadata["detector_label"] == "IM1"
+    assert schedule.science_blocks
+    for block in schedule.science_blocks:
+        assert block.metadata["detector_offset"] == asdict(offset)
+        if case == "ces":
+            assert block.metadata["detector_elevation"] == patch.elevation
+            assert block.elevation != patch.elevation
+        else:
+            assert "detector_elevation" not in block.metadata
+    if case == "ces":
+        samples = QTable.read(folder / "fyst_trajectory.ecsv")
+        assert (samples["el_deg"].value == schedule.science_blocks[0].elevation).all()
+
+
+@pytest.mark.parametrize("module", ["i6", "unknown-module"])
+def test_cli_rejects_patch_module(quickstart, custom_patch_file, tmp_path, monkeypatch,
+                                  capsys, module):
+    from fyst_trajectories import get_primecam_offset
+
+    with custom_patch_file.open("a") as stream:
+        stream.write(f"module: {module}\n")
+    folder = tmp_path / "generated"
+    monkeypatch.setattr(sys, "argv", [
+        "patch_to_ecsv.py", "--patch-file", str(custom_patch_file),
+        "--start", quickstart.DEFAULT_START["pong"], "--output-dir", str(folder),
+    ])
+    with pytest.raises(KeyError) as native:
+        get_primecam_offset(module)
+    with pytest.raises(SystemExit) as error:
+        quickstart.main()
+    assert error.value.code == 2
+    assert native.value.args[0] in capsys.readouterr().err
+    assert not folder.exists()
+
+
 def test_cli_propagates_other_generation_errors(quickstart, tmp_path, monkeypatch):
     def fail(*args, **kwargs):
         raise ValueError("unrelated generation error")

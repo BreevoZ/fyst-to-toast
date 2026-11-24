@@ -7,7 +7,8 @@ Examples (from the repository root):
   python scripts/patch_to_ecsv.py ces --with-calibrations
   python scripts/patch_to_ecsv.py ces --sample-rate 5
 
-YAML keys are ObservingPatch arguments; templates: examples/patches/.
+YAML accepts ObservingPatch arguments and an optional module: NAME (e.g. IM1)
+to set the PrimeCam detector offset. Templates are in examples/patches/.
 Minimal CES (angles in deg, velocity in deg/s, timestep in s):
   name: my CES
   ra_center: 330
@@ -54,9 +55,10 @@ DEFAULT_START = {
 }
 
 
-def load_patch(path):
-    """Load ObservingPatch constructor arguments from a YAML mapping."""
+def _load_patch_with_module(path):
+    """Read the patch and its optional PrimeCam module label together."""
     import yaml
+    from fyst_trajectories import get_primecam_offset
     from fyst_trajectories.overhead import ObservingPatch
 
     path = Path(path).expanduser()
@@ -65,9 +67,24 @@ def load_patch(path):
             data = yaml.safe_load(stream)
         if not isinstance(data, Mapping):
             raise ValueError("expected a YAML mapping of ObservingPatch arguments")
-        return ObservingPatch(**data)
+        if "module" in data:
+            module = data.pop("module")
+            if not isinstance(module, str):
+                raise ValueError("module must be a string")
+            try:
+                offset = get_primecam_offset(module)
+            except KeyError as error:
+                raise ValueError(f"module: {error.args[0]}") from error
+            return ObservingPatch(**data, detector_offset=offset), module
+        return ObservingPatch(**data), None
     except (OSError, yaml.YAMLError, TypeError, ValueError, KeyError) as error:
         raise ValueError(f"Cannot load patch {path}: {error}") from error
+
+
+def load_patch(path):
+    """Load an ObservingPatch from YAML, resolving its optional module."""
+    patch, _ = _load_patch_with_module(path)
+    return patch
 
 
 def example_patch(case):
@@ -128,7 +145,7 @@ def main():
         else PATCH_DIR / f"{args.case}.yaml"
     )
     try:
-        patch = load_patch(patch_path)
+        patch, module = _load_patch_with_module(patch_path)
     except ValueError as error:
         parser.error(str(error))
     folder = (
@@ -185,6 +202,7 @@ def main():
             iers_file=iers_path,
             overwrite=args.overwrite,
             overhead_model=overhead_model,
+            detector_label=module,
         )
     except ValueError as error:
         # FYST uses a plain ValueError for the scheduler's sample interval limit.

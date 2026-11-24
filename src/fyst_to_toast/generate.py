@@ -282,6 +282,7 @@ def generate_trajectory(
     duration_s,
     sample_rate_hz=None,
     overhead_model=None,
+    detector_label=None,
     iers_file=None,
     overwrite=False,
 ):
@@ -300,6 +301,7 @@ def generate_trajectory(
     With no science, only the full timeline and a no_science report are written.
     ``sample_rate_hz`` overrides the timestep on a copy, leaving ``patch``
     unchanged. If omitted, use the patch timestep or FYST's default.
+    Optional ``detector_label`` records the module name in the report and schedule.
     """
     import numpy as np
     from astropy.time import Time
@@ -335,6 +337,9 @@ def generate_trajectory(
     with _capture_fyst_warnings() as fyst_warnings:
         timeline = generate_observing_timeline(patch, start, duration_s, overhead_model)
         report = _initial_report(patch, label, timeline, start, duration_s, iers_path)
+        if detector_label is not None:
+            timeline.metadata["detector_label"] = detector_label
+            report["detector_label"] = detector_label
         report["fyst_warnings"] = fyst_warnings
         if overwrite:
             # A no-science run must not leave a stale trajectory; never touch H5.
