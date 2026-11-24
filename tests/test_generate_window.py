@@ -25,7 +25,7 @@ from fyst_to_toast import trajectory_h5 as schema
 from fyst_to_toast.generate import generate_window_ces, science_only_overhead, sha256
 
 START = "2026-08-13T03:48:45.147"
-PLANNER = "fyst_trajectories.planning.plan_constant_el_window_scan"
+PLANNER = "fyst_trajectories.planning.plan_constant_el_scan"
 OUTPUTS = {"schedule.ecsv", "fyst_trajectory.ecsv", "report.json"}
 
 
@@ -150,7 +150,7 @@ def test_planner_inputs_warnings_and_iers(tmp_path, monkeypatch, rate):
     from fyst_trajectories import planning
     from fyst_trajectories.exceptions import PointingWarning
 
-    original = planning.plan_constant_el_window_scan
+    original = planning.plan_constant_el_scan
     calls = []
 
     def capture(field, **kwargs):
@@ -158,7 +158,7 @@ def test_planner_inputs_warnings_and_iers(tmp_path, monkeypatch, rate):
         warnings.warn("window test advisory", PointingWarning)
         return original(field, **kwargs)
 
-    monkeypatch.setattr(planning, "plan_constant_el_window_scan", capture)
+    monkeypatch.setattr(planning, "plan_constant_el_scan", capture)
     field = planning.FieldRegion(ra_center=20, dec_center=-3, width=60, height=14)
     iers_file = tmp_path / "iers-provenance.txt"
     iers_file.write_text("Provenance only: the caller keeps the bundled IERS table.\n")

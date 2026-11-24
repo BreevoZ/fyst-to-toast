@@ -410,7 +410,7 @@ def generate_window_ces(
         CalibrationPolicy, ObservingTimeline, TimelineBlock, write_timeline,
         io as overhead_io,
     )
-    from fyst_trajectories.planning import plan_constant_el_window_scan
+    from fyst_trajectories.planning import plan_constant_el_scan
 
     sampling = {}
     if sample_rate_hz is not None:
@@ -431,10 +431,10 @@ def generate_window_ces(
         if iers_path in outputs:
             raise ValueError("Outputs must not overwrite the input IERS file")
 
-    planner = "fyst_trajectories.planning.plan_constant_el_window_scan"
+    planner = "fyst_trajectories.planning.plan_constant_el_scan"
     site = get_fyst_site()
     with _capture_fyst_warnings() as fyst_warnings:
-        planned = plan_constant_el_window_scan(
+        planned = plan_constant_el_scan(
             field, az_window=az_window, elevation=elevation, velocity=velocity,
             duration=duration_s, site=site, start_time=start, az_accel=az_accel,
             detector_offset=detector_offset, **sampling,
