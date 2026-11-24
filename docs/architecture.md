@@ -56,9 +56,10 @@ The `case` label remains `ces`, `daisy` or `pong`, derived from `scan_type`
 (`constant_el` maps to `ces`), preserving downstream H5 names. Other scan types
 raise `ValueError`; non-patch inputs raise `TypeError`.
 
-For FYST >= 0.13, `scripts/window_ces_to_ecsv.py` calls `generate_window_ces`, which
-uses `plan_constant_el_window_scan` directly: one block without scheduler
-calibrations, slews or subscan splitting. It requires `--window-file PATH`,
+For FYST >= 0.15, `scripts/window_ces_to_ecsv.py` calls `generate_window_ces`, which
+uses the window form of `plan_constant_el_scan` and writes one block with
+`TimelineBlock.from_window_scan` without scheduler calibrations, slews or subscan splitting.
+The CLI requires `--window-file PATH`,
 `--start UTC` and `--duration-s S`. The YAML mapping requires `az_window`, `elevation`
 and `velocity`; optional keys are `az_accel` (default 1.0), `timestep`, `module`
 and `field`. Unknown/missing keys and invalid types fail before output is created.
@@ -68,8 +69,8 @@ schedule header. `field` supplies exactly `ra_center`, `dec_center`, `width`,
 timestep via the existing library API; omitting both retains FYST's default.
 Output defaults to `output/generated/<YAML stem>/` unless `--output-dir` is given.
 Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`, followed by
-the usual H5 writer. The schedule is a summary, not a reconstruction recipe:
-FYST's `schedule_to_trajectories` returns no trajectories for it.
+the usual H5 writer. The schedule records the scan for `schedule_to_trajectories`
+to rebuild sample for sample. The trajectory ECSV holds the exported samples.
 Both generation CLIs disable IERS downloads and set `auto_max_age=None` to allow
 older bundled predictions, recording `iers_auto_max_age: null` in the report.
 They retain `iers_degraded_accuracy="error"` and accept an offline `--iers-file`;

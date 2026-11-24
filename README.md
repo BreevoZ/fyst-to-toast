@@ -11,7 +11,7 @@ FYST scheduler ─► schedule.ecsv ──────────────�
 
 ## Status
 
-Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.13.0.
+Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.15.0.
 
 - Serial execution only (no MPI).
 - Included focalplanes are demonstrations; real Nasmyth ports and module clocking are not validated.
@@ -33,7 +33,7 @@ This is enough to read H5 files and run SimFYST. Generating trajectories also ne
 FYST, which is installed from its release tag:
 
 ```bash
-python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.13.0"
+python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.15.0"
 ```
 
 ## Quick start
@@ -96,7 +96,7 @@ Pass `overhead_model=science_only_overhead()` for science-only, as shown above.
 
 ### Fixed-azimuth-window CES
 
-Requires FYST trajectories >= 0.13. For Deep56 rising:
+Requires FYST trajectories >= 0.15. For Deep56 rising:
 
 ```bash
 export RUN_DIR=output/generated/deep56_e50_rising
@@ -105,8 +105,8 @@ python scripts/window_ces_to_ecsv.py --window-file examples/windows/deep56_e50_r
 python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"
 ```
 
-This calls FYST's `plan_constant_el_window_scan` directly, bypassing the scheduler:
-one block, with no calibrations, slews or subscan splitting. The [YAML template](examples/windows/deep56_e50_rising.yaml)
+This calls the window form of FYST's `plan_constant_el_scan` directly to generate
+one block without calibrations, slews or subscan splitting. The [YAML template](examples/windows/deep56_e50_rising.yaml)
 defines required `az_window`, `elevation`, `velocity` and optional `az_accel`,
 `timestep`, `module`, `field`. `module` moves the boresight so that module sweeps
 the window; `field` is only for FYST drift warnings. `--sample-rate HZ` overrides
@@ -114,8 +114,8 @@ the YAML timestep; otherwise FYST supplies its default when absent.
 Output defaults to `output/generated/<YAML stem>/`; use `--output-dir` to change it.
 
 Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`; convert to H5
-as usual. The schedule is a summary: FYST's `schedule_to_trajectories` returns no
-trajectories for it, so use `fyst_trajectory.ecsv`.
+as usual. The schedule records the scan so FYST's `schedule_to_trajectories` can
+rebuild it sample for sample. `fyst_trajectory.ecsv` holds the exported samples.
 Both generation CLIs allow older bundled IERS predictions offline via
 `auto_max_age=None`, recorded as `iers_auto_max_age` in the report; use `--iers-file`
 to supply another offline table.
@@ -176,7 +176,7 @@ Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGro
 ## Conventions
 
 - **Roll:** per sample, `boresight_roll = -nasmyth_sign * El`, with the port read from the
-  FYST schedule. FYST 0.12.0 writes the TOAST roll into `boresight_angle`, marked by
+  FYST schedule. Since FYST 0.12.0, `boresight_angle` stores the TOAST roll, marked by
   `boresight_angle_convention: toast_roll`; `downstream_maps.py` preserves it and
   corrects older (<= 0.11) schedules for SimGround.
 - **Clocking:** per module, in the focalplane detector quaternions as `Rz(-c) * Q_fp`, not in roll.

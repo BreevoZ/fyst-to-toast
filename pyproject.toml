@@ -20,9 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Used by fyst_to_toast.generate, the two generation scripts and optional FYST tests.
-# 0.12 marks schedule boresight_angle as the TOAST roll with a convention header;
-# 0.13 adds plan_constant_el_window_scan, used by generate_window_ces.
-fyst = ["fyst-trajectories>=0.13"]
+# Window CES uses the window form of plan_constant_el_scan, TimelineBlock.from_window_scan and IM bays.
+fyst = ["fyst-trajectories>=0.15"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
