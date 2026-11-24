@@ -307,3 +307,103 @@ def test_generate_rejects_unknown_scan_type(tmp_path, quickstart):
             patch, folder, start=quickstart.DEFAULT_START["pong"], duration_s=1800,
         )
     assert not folder.exists()
+
+
+@pytest.fixture
+def export_patch(tmp_path, quickstart):
+    def run(case, duration_s, *, offset=None, sample_rate_hz=None):
+        patch = quickstart.example_patch(case)
+        if offset is not None:
+            patch = replace(patch, detector_offset=offset)
+        report = generate_trajectory(
+            patch, tmp_path, start=quickstart.DEFAULT_START[case], duration_s=duration_s,
+            sample_rate_hz=sample_rate_hz, overhead_model=science_only_overhead(),
+        )
+        assert report["status"] == "complete"
+        return patch, QTable.read(tmp_path / "fyst_trajectory.ecsv"), report
+
+    with iers.conf.set_temp("auto_download", False), solar_system_ephemeris.set("builtin"):
+        yield run
+
+
+@pytest.mark.parametrize("filename", ["full_timeline.ecsv", "schedule.ecsv"])
+def test_crossing_ces_replays_exported_samples(tmp_path, export_patch, filename):
+    from fyst_trajectories import get_absolute_times
+    from fyst_trajectories.overhead import read_timeline, schedule_to_trajectories
+
+    patch, samples, report = export_patch("ces", 1800, sample_rate_hz=5)
+    timeline = read_timeline(tmp_path / filename)
+    block, = timeline.science_blocks
+    assert block.metadata["scan_params"] == {}
+    window = block.metadata["window_scan"]
+    assert window["az_window"][0] < window["az_window"][1]
+    assert window["az_accel"] == patch.scan_params["az_accel"]
+    exported_block, = samples.meta["blocks"]
+    assert exported_block["requested_timestep_s"] == window["timestep"] == 0.2
+    assert report["requested_sample_rate_hz"] == 5
+
+    (_, scan), = schedule_to_trajectories(timeline)
+    assert window["az_window"] == [scan.config.az_start, scan.config.az_stop]
+    traj = scan.trajectory
+    absolute = get_absolute_times(traj)
+    np.testing.assert_allclose(np.diff(traj.times), 0.2, rtol=1e-3, atol=0)
+    np.testing.assert_array_equal(
+        samples["time_s"].to_value(u.s), (absolute - timeline.start_time).sec,
+    )
+    np.testing.assert_array_equal(samples["timestamp_unix_s"].to_value(u.s), absolute.unix)
+    np.testing.assert_array_equal(samples["block_time_s"].to_value(u.s), traj.times)
+    np.testing.assert_array_equal(samples["az_deg"].to_value(u.deg), traj.az)
+    np.testing.assert_array_equal(samples["el_deg"].to_value(u.deg), traj.el)
+    np.testing.assert_array_equal(samples["az_velocity"].to_value(u.deg / u.s), traj.az_vel)
+    np.testing.assert_array_equal(samples["el_velocity"].to_value(u.deg / u.s), traj.el_vel)
+    np.testing.assert_array_equal(samples["scan_flag"], traj.scan_flag)
+    np.testing.assert_array_equal(samples["scan_index"], block.scan_index)
+    np.testing.assert_array_equal(samples["subscan_index"], block.subscan_index)
+    np.testing.assert_array_equal(
+        samples["boresight_roll_deg"].to_value(u.deg), -timeline.site.nasmyth_sign * traj.el,
+    )
+
+
+@pytest.mark.parametrize("case,duration_s", [("pong", 1500), ("daisy", 600)])
+def test_science_el_final_matches_last_sample(tmp_path, export_patch, case, duration_s):
+    _, samples, _ = export_patch(case, duration_s)
+    assert samples["el_deg"][0] != samples["el_deg"][-1]
+    for filename in ("full_timeline.ecsv", "schedule.ecsv"):
+        table = QTable.read(tmp_path / filename)
+        row, = table[table["block_type"] == "science"]
+        assert row["el_final"] == samples["el_deg"][-1]
+
+
+def test_scheduler_im1_boresight_to_h5(tmp_path, export_patch):
+    from fyst_trajectories import (
+        boresight_to_detector,
+        compute_focal_plane_rotation,
+        get_primecam_offset,
+    )
+    from fyst_trajectories.overhead import read_timeline
+
+    offset = get_primecam_offset("IM1")
+    patch, samples, _ = export_patch("ces", 1800, offset=offset)
+    timeline = read_timeline(tmp_path / "schedule.ecsv")
+    block, = timeline.science_blocks
+    assert block.metadata["detector_offset"] == asdict(offset)
+    assert block.metadata["detector_elevation"] == patch.elevation
+    az = samples["az_deg"].to_value(u.deg)
+    el = samples["el_deg"].to_value(u.deg)
+    assert block.elevation != patch.elevation
+    np.testing.assert_array_equal(el, block.elevation)
+    rotation = compute_focal_plane_rotation(el, site=timeline.site, offset=offset)
+    _, detector_el = boresight_to_detector(az, el, offset, rotation)
+    np.testing.assert_allclose(detector_el, patch.elevation, atol=1e-9, rtol=0)
+
+    site = timeline.site
+    folder = tmp_path / "hdf5"
+    folder.mkdir()
+    name, = schema.write_trajectory_blocks(
+        samples, site_name=site.name, latitude_deg=site.latitude, longitude_deg=site.longitude,
+        height_m=site.elevation, output_dir=folder,
+        source_sha256=hashlib.sha256((tmp_path / "fyst_trajectory.ecsv").read_bytes()).hexdigest(),
+    )
+    loaded = schema._load_trajectory_block(folder / name)
+    np.testing.assert_array_equal(loaded.arrays["azimuth"], samples["az_deg"].to_value(u.rad))
+    np.testing.assert_array_equal(loaded.arrays["elevation"], samples["el_deg"].to_value(u.rad))
