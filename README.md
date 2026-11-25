@@ -9,7 +9,7 @@ FYST scheduler ─► schedule.ecsv ──────────────�
                └► fyst_trajectory.ecsv ─► one H5 per block ─► SimFYST (CES, Daisy, Pong)
 ```
 
-Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.15.0. Serial only
+Experimental **0.4.0**, tested with TOAST 3.0.5 and FYST trajectories 0.15.0. Serial only
 (no MPI); the included focalplanes are demonstrations.
 
 ## Installation
