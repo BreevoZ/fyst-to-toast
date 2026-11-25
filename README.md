@@ -1,199 +1,47 @@
 # fyst-to-toast
 
-Feed FYST telescope trajectories into TOAST simulations.
-FYST plans the scan and generates per-sample motion; `SimFYST` turns those samples
-into TOAST Observations without resampling, so TOAST operators run on FYST's motion.
+Feed FYST telescope trajectories into TOAST simulations. FYST plans the scan and
+generates per-sample motion; `SimFYST` turns those samples into TOAST Observations
+without resampling.
 
 ```text
 FYST scheduler ─► schedule.ecsv ────────────────────────────► TOAST SimGround (CES only)
                └► fyst_trajectory.ecsv ─► one H5 per block ─► SimFYST (CES, Daisy, Pong)
 ```
 
-## Status
+Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.15.0. Serial only
+(no MPI); the included focalplanes are demonstrations.
 
-Experimental **0.3.0**, tested with TOAST 3.0.5 and FYST trajectories 0.15.0.
+## Installation
 
-- Serial execution only (no MPI).
-- Included focalplanes are demonstrations; real Nasmyth ports and module clocking are not validated.
-- Scan-direction, elnod and Sun intervals exist but are empty.
-- For one CES, SimGround (from the schedule) and SimFYST (from H5) give closely matching
-  hits, I/Q/U maps and polarization angles; see [downstream_maps.py](examples/downstream_maps.py).
-
-## Install
-
-In a Python 3.10+ environment that already has TOAST (setuptools 77+), from a clone
-of this repository:
+In a Python 3.10+ environment that already has TOAST (setuptools 77+), from a clone:
 
 ```bash
 python -m pip install --no-deps --no-build-isolation -e .
+python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.15.0"
 export MPI_DISABLE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1  # before importing NumPy/TOAST
 ```
 
-This is enough to read H5 files and run SimFYST. Generating trajectories also needs
-FYST, which is installed from its release tag:
-
-```bash
-python -m pip install "fyst-trajectories @ git+https://github.com/ccatobs/fyst-trajectories.git@v0.15.0"
-```
+FYST is needed only to generate trajectories; reading H5 files and running SimFYST do not need it.
 
 ## Quick start
 
-From the repository root:
-
 ```bash
 export RUN_DIR=output/quickstart
-python scripts/patch_to_ecsv.py ces --output-dir "$RUN_DIR"     # or daisy, pong
+python scripts/patch_to_ecsv.py ces --output-dir "$RUN_DIR"           # or daisy, pong
 python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"  # writes $RUN_DIR/hdf5/
 ```
 
-Both scripts use Astropy's bundled IERS data and never download; pass `--iers-file`
-for another offline table.
-
-### Use your own patch
-
-Copy a [YAML template](examples/patches/), edit the field and scan parameters,
-then supply its UTC start:
-
-```bash
-cp examples/patches/pong.yaml my_patch.yaml
-# Edit my_patch.yaml for your observation.
-python scripts/patch_to_ecsv.py --patch-file my_patch.yaml --start 2026-03-15T01:00:00
-```
-
-YAML keys are `ObservingPatch` constructor arguments. Use either a case shortcut
-(`ces`, `daisy`, `pong`) or `--patch-file`; custom files require `--start`.
-Output defaults to `output/generated/<case or YAML stem>/`, with a 10800-second
-scheduling window. Set `--duration-s` to change it. Sampling uses the YAML
-`scan_params.timestep` (0.1 s in the templates), or FYST's default when unset;
-`--sample-rate HZ` overrides it without editing the file.
-
-The CLI defaults to science-only: calibration durations are 0, but slews and
-settle time remain, so science does not fill 100% of the window.
-Use `--with-calibrations` for FYST's default calibrations.
-
-FYST warns but does not block generation when a pattern exceeds mount limits.
-These warnings are listed in `report.json` under `fyst_warnings`.
-
-Alternatively, build an `ObservingPatch` and call the Python API directly:
-
-```python
-from astropy.coordinates import solar_system_ephemeris
-from astropy.utils import iers
-from fyst_trajectories.overhead import ObservingPatch
-from fyst_to_toast.generate import generate_trajectory, science_only_overhead
-iers.conf.auto_download = False
-patch = ObservingPatch(name="my Pong", ra_center=185, dec_center=-35,
-                      width=1.2, height=1.0, scan_type="pong", velocity=0.3)
-with solar_system_ephemeris.set("builtin"):
-    report = generate_trajectory(patch, "output/my_patch", start="2026-03-15T04:00:00",
-                                 duration_s=1800, overhead_model=science_only_overhead())
-```
-
-Omit `sample_rate_hz` to use the patch's `scan_params["timestep"]` or FYST's default
-when unset. An override leaves the original patch unchanged.
-The Python API follows FYST: `overhead_model=None` uses FYST's default calibrations.
-Pass `overhead_model=science_only_overhead()` for science-only, as shown above.
-
-### Fixed-azimuth-window CES
-
-Requires FYST trajectories >= 0.15. For Deep56 rising:
-
-```bash
-export RUN_DIR=output/generated/deep56_e50_rising
-python scripts/window_ces_to_ecsv.py --window-file examples/windows/deep56_e50_rising.yaml \
-    --start 2026-08-13T03:48:45.147 --duration-s 14400
-python scripts/save_trajectory_h5.py "$RUN_DIR/fyst_trajectory.ecsv"
-```
-
-This calls the window form of FYST's `plan_constant_el_scan` directly to generate
-one block without calibrations, slews or subscan splitting. The [YAML template](examples/windows/deep56_e50_rising.yaml)
-defines required `az_window`, `elevation`, `velocity` and optional `az_accel`,
-`timestep`, `module`, `field`. `module` moves the boresight so that module sweeps
-the window; `field` is only for FYST drift warnings. `--sample-rate HZ` overrides
-the YAML timestep; otherwise FYST supplies its default when absent.
-Output defaults to `output/generated/<YAML stem>/`; use `--output-dir` to change it.
-
-Outputs are `schedule.ecsv`, `fyst_trajectory.ecsv` and `report.json`; convert to H5
-as usual. The schedule records the scan so FYST's `schedule_to_trajectories` can
-rebuild it sample for sample. `fyst_trajectory.ecsv` holds the exported samples.
-Both generation CLIs allow older bundled IERS predictions offline via
-`auto_max_age=None`, recorded as `iers_auto_max_age` in the report; use `--iers-file`
-to supply another offline table.
-
-### Load the generated observations
-
-```python
-import os
-from pathlib import Path
-from astropy import units as u
-from astropy.coordinates import solar_system_ephemeris
-from astropy.table import QTable
-from astropy.utils import iers
-from toast import Data
-from toast.instrument import GroundSite, Telescope
-from toast.instrument_sim import fake_boresight_focalplane
-from toast.mpi import Comm
-from fyst_to_toast.sim_fyst import SimFYST
-
-iers.conf.auto_download = False
-run_dir = Path(os.environ["RUN_DIR"])
-meta = QTable.read(run_dir / "schedule.ecsv").meta
-site = GroundSite(meta["site_name"], meta["site_lat"],
-                  meta["site_lon"], meta["site_alt"])
-telescope = Telescope(
-    "FYST-demo", site=site,
-    focalplane=fake_boresight_focalplane(n_pix=1, sample_rate=10 * u.Hz),
-)
-data = Data(Comm(world=None))
-try:
-    with solar_system_ephemeris.set("builtin"):
-        SimFYST(
-            telescope=telescope,
-            trajectory_files=[str(run_dir / "hdf5/files.json")],
-        ).apply(data)
-    print([(obs.name, obs.n_all_samples) for obs in data.obs])
-    # Apply downstream TOAST operators here, before clearing the data.
-finally:
-    data.clear()
-```
-
-Set `--sample-rate HZ` to override the patch's sampling (templates use 10 Hz).
-SimFYST checks `telescope.focalplane.sample_rate` against both the stored H5 rate and
-the timestamp rate with `sample_rate_rtol=1e-3` by default: FYST spreads samples
-evenly over each block, so the measured rate can differ slightly from the nominal one.
-Set `sample_rate_rtol=1e-6` for the old strict check.
-Pass `weather="atacama"` to attach a TOAST `SimWeather` to each block, as SimGround does.
-
-## What each Observation contains
-
-| | Content |
+| Script | Use it to |
 |---|---|
-| Shared | `times`, `azimuth`, `elevation`, `boresight_azel`, `boresight_radec`, `position`, `velocity`, `flags`; original FYST arrays (`fyst_*`, scan/subscan indices) and `boresight_roll` |
-| Flags | science 0, turnaround 4, unclassified/retune 1; the FYST enum stays in `fyst_scan_flag` |
-| Intervals | `scanning`, `turnaround`, `fyst_invalid`; `throw` (half turn + scan + half turn, as in SimGround); SimGround's other interval names, empty |
-| Metadata | `scan_el`, `scan_min_el`, `scan_max_el`, `scan_min_az`, `scan_max_az` in SimGround's units; provenance |
+| `patch_to_ecsv.py` | Let FYST schedule a patch (crossing CES, fixed-window CES, Pong, Daisy), with optional calibrations and Prime-Cam module |
+| `window_ces_to_ecsv.py` | Replay one observing-plan row (azimuth window, elevation, start, duration) at its own start time |
 
-## Conventions
+## Documentation
 
-- **Roll:** per sample, `boresight_roll = -nasmyth_sign * El`, with the port read from the
-  FYST schedule. Since FYST 0.12.0, `boresight_angle` stores the TOAST roll, marked by
-  `boresight_angle_convention: toast_roll`; `downstream_maps.py` preserves it and
-  corrects older (<= 0.11) schedules for SimGround.
-- **Clocking:** per module, in the focalplane detector quaternions as `Rz(-c) * Q_fp`, not in roll.
-- **Time:** float64 Unix seconds, native samples and block boundaries; UTC strings use milliseconds.
-
-Contracts and limitations: [docs/architecture.md](docs/architecture.md).
-Upstream TOAST issues met along the way: [docs/toast_issues.md](docs/toast_issues.md).
-
-## Examples and tools
-
-| Example | Purpose |
-|---|---|
-| [simfyst_from_h5.py](examples/simfyst_from_h5.py) | Load one H5 block and save the Observation |
-| [pipeline_walkthrough.py](examples/pipeline_walkthrough.py) | Step through generation, H5, loading and roll geometry, with a GIF |
-| [downstream_maps.py](examples/downstream_maps.py) | TOAST sky, noise and binned maps; `ces --compare-simground` compares with SimGround |
-
-[Tools](tools/README.md) browse ECSV/H5 files; [fixtures](data/README.md) are small sample H5 files.
+- [Usage](docs/usage.md): patch YAML, options, Python API, loading the Observations, conventions, examples
+- [Architecture](docs/architecture.md): contracts and limitations
+- [TOAST issues](docs/toast_issues.md) met along the way
 
 ## Tests
 
