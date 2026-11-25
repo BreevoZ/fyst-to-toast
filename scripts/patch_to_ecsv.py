@@ -1,4 +1,9 @@
-r"""Quick-start example: YAML patch → native schedule → per-sample ECSV.
+r"""Schedule a patch with FYST and export its per-sample ECSV (the default entry point).
+
+FYST's scheduler decides when to observe: a crossing CES, a CES over a fixed
+azimuth window (scan_params az_min/az_max), pong or daisy, with optional
+calibrations and an optional Prime-Cam module. To replay a given observing-plan
+row at its own start time, use window_ces_to_ecsv.py instead.
 
 Examples (from the repository root):
   python scripts/patch_to_ecsv.py ces  # or daisy, pong
@@ -6,6 +11,8 @@ Examples (from the repository root):
       --start 2026-08-02T01:25:00.000 --duration-s 10800
   python scripts/patch_to_ecsv.py ces --with-calibrations
   python scripts/patch_to_ecsv.py ces --sample-rate 5
+  python scripts/patch_to_ecsv.py --patch-file examples/patches/ces_window.yaml \
+      --start 2026-08-13T03:20:45.147 --duration-s 16080
 
 YAML accepts ObservingPatch arguments and an optional module: NAME (e.g. IM1)
 to set the PrimeCam detector offset. Templates are in examples/patches/.

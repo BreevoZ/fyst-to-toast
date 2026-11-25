@@ -1,16 +1,23 @@
-# Copy this Pong template and edit the field and scan parameters for your observation.
-# This FYST docs example exceeds the az acceleration limit (1.5 deg/s²) above El ≈ 55°.
-# Sky turnaround acceleration per axis ≈ num_terms × velocity² / half-width; az needs about 1/cos(El) more.
-# Lower velocity, fewer terms, a larger field or lower elevation reduce the acceleration.
+# Pong: a box pattern scanned where the field is on the sky (no `elevation`).
+# Copy and edit. Angles in deg, speeds in deg/s, times in s.
+# Commented keys are optional; the value shown is FYST's default or an example.
+# This FYST docs example exceeds the az acceleration limit (1.5 deg/s^2) above El ~ 55 deg.
+# Sky turnaround acceleration per axis ~ num_terms * velocity^2 / half-width; az needs ~1/cos(El) more.
+# Lower velocity, fewer terms, a larger field or lower elevation reduce it. 1.5 deg/s^2 is
+# FYST's warning threshold; a pattern beyond the axis limits the scheduler checks is not booked.
 name: native Pong
 ra_center: 180
 dec_center: -30
-width: 2
+width: 2                  # box size
 height: 2
 scan_type: pong
-velocity: 0.4
+velocity: 0.4             # on-sky speed
+# priority: 1.0           # only matters with several patches
+# weight: 1.0
 scan_params:
-  spacing: 0.1
-  num_terms: 4
-  angle: 0.0
-  timestep: 0.1
+  spacing: 0.1            # line spacing
+  num_terms: 4            # Fourier terms that round the turnarounds
+  angle: 0.0              # pattern rotation
+  timestep: 0.1           # >= 0.05 for the scheduler
+  # n_cycles: 2           # most whole pattern periods per subscan; default: as many as fit
+# module: IM1             # Prime-Cam bay; the module's and the boresight's patterns must both stay above the elevation limit

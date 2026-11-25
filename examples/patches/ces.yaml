@@ -1,13 +1,22 @@
-# Copy this CES template and edit the field and scan parameters for your observation.
-name: native CES
-ra_center: 330
+# Crossing CES: FYST's scheduler waits for the field to cross `elevation` and
+# sweeps the azimuth range where the field's border meets that elevation.
+# Copy and edit. Angles in deg, speeds in deg/s, times in s.
+# Commented keys are optional; the value shown is FYST's default or an example.
+name: native CES          # label, unique within a schedule
+ra_center: 330            # field centre
 dec_center: -50
-width: 30
+width: 30                 # field size on the sky
 height: 8
 scan_type: constant_el
-velocity: 1
-elevation: 50
+velocity: 1               # azimuth coordinate rate; on-sky speed = velocity * cos(elevation)
+elevation: 50             # scan elevation (the module's when `module` is set)
+# priority: 1.0           # lower = more urgent; only matters with several patches
+# weight: 1.0             # higher = preferred; only matters with several patches
 scan_params:
-  timestep: 0.1
-  az_accel: 1.0
-# module: IM1  # Optional Prime-Cam bay; schedules the patch for that module.
+  timestep: 0.1           # sample interval; the scheduler needs >= 0.05 (Go TCS limit)
+  az_accel: 1.0           # azimuth acceleration, deg/s^2
+  # az_padding: 0.0       # extra azimuth on each side of the swept range
+  # rising: true          # true = rising (east) pass, false = setting (west); omit = whichever opens first
+  # lsa_window: [310, 330]  # local sidereal angle window; fixes the timing; not with az_min/az_max
+  # az_min / az_max       # fixed azimuth window instead of the crossing range: see ces_window.yaml
+# module: IM1             # Prime-Cam bay; schedules the patch for that module, not the boresight

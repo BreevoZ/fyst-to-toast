@@ -32,6 +32,15 @@ def test_template_loads(quickstart, case, scan_type, timestep_index):
     assert patch == quickstart.load_patch(path)
 
 
+def test_window_template_loads(quickstart):
+    from fyst_trajectories import get_primecam_offset
+
+    patch = quickstart.load_patch(quickstart.PATCH_DIR / "ces_window.yaml")
+    assert patch.scan_type == "constant_el"
+    assert (patch.scan_params["az_min"], patch.scan_params["az_max"]) == (50, 76)
+    assert patch.detector_offset == get_primecam_offset("IM1")
+
+
 @pytest.fixture
 def custom_patch_file(tmp_path):
     path = tmp_path / "small_field.yaml"

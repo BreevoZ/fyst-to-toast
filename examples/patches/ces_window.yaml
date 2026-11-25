@@ -1,0 +1,25 @@
+# CES over a fixed azimuth window: FYST sweeps az_min..az_max and times the visit
+# by the field's pass on that side of the meridian, with optional calibrations.
+# To replay an observing-plan row at its own start time, use
+# scripts/window_ces_to_ecsv.py instead.
+# Example: Deep56 rising window, observed with the Prime-Cam bay IM1
+# (an example bay, not a deployed module position). Run with, e.g.:
+#   python scripts/patch_to_ecsv.py --patch-file examples/patches/ces_window.yaml \
+#       --start 2026-08-13T03:20:45.147 --duration-s 16080
+# Angles in deg, speeds in deg/s, times in s. Other keys as in ces.yaml.
+name: Deep56 rising window
+ra_center: 20
+dec_center: -3
+width: 60
+height: 14
+scan_type: constant_el
+velocity: 1               # azimuth coordinate rate; on-sky speed = velocity * cos(elevation)
+elevation: 50             # the module's elevation; FYST raises the boresight to hold it
+scan_params:
+  az_min: 50              # give both; az_min < az_max; across 0/360 write e.g. [355, 370]
+  az_max: 76
+  timestep: 0.1           # >= 0.05 for the scheduler
+  az_accel: 1.0
+  # az_padding: 0.0       # widens the window on each side
+  # rising: true          # names the window's side; needed only if the window touches the meridian
+module: IM1               # Prime-Cam bay; omit to schedule for the boresight

@@ -1,12 +1,19 @@
-# Copy this Daisy template and edit the field and scan parameters for your observation.
+# Daisy: petals around the field centre, scanned where the field is on the sky
+# (no `elevation`). Copy and edit. Angles in deg, speeds in deg/s, times in s.
+# Commented keys are optional; the value shown is FYST's default.
 name: native Daisy
 ra_center: 180
 dec_center: -30
 width: 2
 height: 2
 scan_type: daisy
-velocity: 0.3
+velocity: 0.3             # on-sky speed
+# priority: 1.0           # only matters with several patches
+# weight: 1.0
 scan_params:
-  radius: 1
-  turn_radius: 0.3
-  timestep: 0.1
+  radius: 1               # characteristic radius; petals reach past it by at least turn_radius
+  turn_radius: 0.3        # radius of curvature of the turns
+  # avoidance_radius: 0.1   # keep this far from the exact centre
+  # start_acceleration: 0.5 # ramp-up acceleration, deg/s^2
+  timestep: 0.1           # >= 0.05 for the scheduler
+# module: IM1             # Prime-Cam bay; the module's and the boresight's patterns must both stay above the elevation limit

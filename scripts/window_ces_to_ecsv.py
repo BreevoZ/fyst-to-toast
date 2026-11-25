@@ -1,4 +1,9 @@
-r"""Export one fixed-azimuth-window CES using FYST's planner directly.
+r"""Replay one fixed-azimuth-window CES at a given start time and duration.
+
+Use this to reproduce a row of an observing plan (azimuth window, elevation,
+start, duration), such as a line of the Prime-Cam season schedule. FYST's
+planner runs directly: no scheduler, calibrations or wait for the field's pass.
+To let FYST choose the time, use patch_to_ecsv.py with az_min/az_max.
 
 Examples (from the repository root):
   python scripts/window_ces_to_ecsv.py \
